@@ -72,12 +72,18 @@ class MemoryConsumer:
     # and may get assigned an address space of size $memsize and a color
     # for this address space.
 
-    def __init__(self, memsize, color=None):
-        assert memsize % PAGE_SIZE == 0  # memory size of memory consume must be a multiple of page size
+    def __init__(self, memsize, page_size=4096):
+        """
+        Args:
+            memsize (int): Memory size of memory consumer in bytes.
+            page_size (int): Page size in bytes.
+        """
+        assert memsize % page_size == 0  # memory size of memory consume must be a multiple of page size
         assert memsize > 0
 
+        self.address_space = None
         self.memsize = memsize
-        self.set_color(color)
+        self.color = None
 
     def set_color(self, color):
         self.color = color
@@ -108,6 +114,10 @@ class MemoryConsumer:
         n = sum(len(mem_range) for mem_range in address_space)
 
         return n == len(union)
+
+    def get_address_space(self):
+        return self.address_space
+
 
 
 class Subject(MemoryConsumer):
