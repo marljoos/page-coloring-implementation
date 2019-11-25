@@ -131,12 +131,17 @@ class Subject(MemoryConsumer):
     # A subject represents a running instance of a component on top of a SK.
     # It has a memory requirement (in Byte) and may have channels to other subjects.
 
-    def __init__(self, memsize, channels=[]):
-        super().__init__(memsize)
-        self.channels = {}
+    inchannels = []
+    outchannels = []
 
-    def getChannelTo(self, subject):
-        return self.channels[subject]
+    def add_inchannel(self, channel: 'Channel'):
+        self.inchannels.append(channel)
+
+    def add_outchannel(self, channel: 'Channel'):
+        self.outchannels.append(channel)
+
+    def get_channels(self):
+        return self.inchannels + self.outchannels
 
 
 class Channel(MemoryConsumer):
@@ -147,6 +152,15 @@ class Channel(MemoryConsumer):
         super().__init__(memsize)
         self.source = source
         self.target = target
+
+        source.add_outchannel(self)
+        target.add_inchannel(self)
+
+    def get_source(self):
+        return self.source
+
+    def get_target(self):
+        return self.target
 
 
 ###############################################################################
