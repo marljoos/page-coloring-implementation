@@ -238,7 +238,6 @@ def assign_memory_consumer_colors(
 
         # count colors which are used (> 0)
         color_ctr = sum(color > 0 for color in used_colors_table)
-        logging.debug('used_colors_table: ' + str(used_colors_table))
 
     logging.info('Number of used colors: ' + str(color_ctr))
 
