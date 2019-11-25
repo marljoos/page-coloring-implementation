@@ -4,6 +4,7 @@
 import logging
 import sys
 from typing import List, Dict, Set  # need this for specifying List/Dict/Set types for type hints
+from itertools import cycle
 
 logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
 
@@ -12,17 +13,23 @@ This script models certain aspects of a page-coloring algorithm which will be
 integrated into a separation kernel (SK) build system.
 """
 
-# Main memory size in Gibibyte
-MAIN_MEMORY_SIZE = 4
-# An address space is a list of allocated byte-addressing memory ranges
-# which do not overlap
-MAIN_MEMORY_ADDRESS_SPACE = [range(0, MAIN_MEMORY_SIZE * (1024 ** 3))]
 
-# Page size in Byte
-PAGE_SIZE = 4096
+# TODO: Specification of bootstrap processor needed?
+class System:
+    """Description of a system which consists of CPU cores, main memory and (multiple layers) of caches."""
+    def __init__(self, cpu_cache_config, page_size=4096):
+        """
+        Args:
+            cpu_cache_config (dict): Complex data structure which describes CPU cores, caches and their mappings to the
+            CPU cores.
+            page_size (int): Page size in bytes.
+        """
+        # TODO: Implement initialization
+        pass
 
-# Number of CPUs
-NUM_CPUS = 4
+
+class CPU:
+    pass
 
 
 class Cache:
@@ -231,7 +238,51 @@ def print_memory_consumer(all_memory_consumers: Dict[str, MemoryConsumer]) -> No
 
 ###############################################################################
 
+
 def main():
+    # Main memory size in Gibibyte
+    MAIN_MEMORY_SIZE = 4
+    # An address space is a list of allocated byte-addressing memory ranges
+    # which do not overlap
+    MAIN_MEMORY_ADDRESS_SPACE = [range(0, MAIN_MEMORY_SIZE * (1024 ** 3))]
+
+    # Page size in Byte
+    PAGE_SIZE = 4096
+
+    # Number of CPU cores
+    NUM_CPUS = 4
+
+    cpu_cores = [CPU() for _ in range(0, NUM_CPUS)]
+    l1_caches = \
+        [Cache(total_capacity=(32 * 1024), associativity=8, cacheline_capacity=64, page_size=PAGE_SIZE)
+         for _ in range(0, len(cpu_cores))]
+    l2_caches = \
+        [Cache(total_capacity=(256 * 1024), associativity=8, cacheline_capacity=64, page_size=PAGE_SIZE)
+         for _ in range(0, len(cpu_cores)//2)]
+    l3_caches = [Cache(total_capacity=6 * (1024 ** 2), associativity=12, cacheline_capacity=64, page_size=PAGE_SIZE)]
+
+    # TODO: System must check if cpu_cache_config is valid (validity has to be defined)
+    # Definition of CPU cores and Caches and their mappings to each other
+    cpu_cache_config = {
+        'cpu_cores': cpu_cores,
+        'caches': [l1_caches, l2_caches, l3_caches],  # 1st element -> L1 caches, 2nd element -> L2 caches, etc.
+        'cpu_cache_mapping': [  # 1st element -> L1 cache mappings, 2nd element -> L2 cache mappings, etc.
+            # one dedicated L1 cache per CPU core
+            [(cpu, l1_cache) for cpu, l1_cache in zip(cpu_cores, l1_caches)],
+            # first two CPU cores get the same L2 cache, last two CPU cores get the other L2 cache
+            # assumes two L2 caches #ASSMS-CACHE-CONFIG-1
+            [(cpu, l2_cache) for cpu, l2_cache
+             in zip(cpu_cores, [l2_caches[0], l2_caches[0], l2_caches[1], l2_caches[1]])],
+            # every CPU core gets the same L3 cache
+            # assumes one L3 cache for all CPU cores #ASSMS-CACHE-CONFIG-2
+            [(cpu, l3_cache) for cpu, l3_cache in zip(cpu_cores, cycle(l3_caches))]
+        ]
+    }
+
+    assert(len(l2_caches) == 2)     # #ASSMS-CACHE-CONFIG-1
+    assert(len(l3_caches) == 1)     # #ASSMS-CACHE-CONFIG-2
+
+    system = System(cpu_cache_config=cpu_cache_config, page_size=PAGE_SIZE)
     # Specification of subjects and their memory requirements.
     subjects = {
         'Untrusted App 1': Subject(2 * PAGE_SIZE),
