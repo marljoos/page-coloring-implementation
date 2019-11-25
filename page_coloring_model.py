@@ -208,12 +208,15 @@ def assign_memory_consumer_colors(
     logging.info('Number of used colors: ' + str(color_ctr))
 
 
-def print_memory_consumer_colors(all_memory_consumers: Dict[str, MemoryConsumer]) -> None:
-    fmt = '{0: <20}'  # format string with width 20
-    print(fmt.format('Memory Consumer') + ': Color')
-    print("=" * 30)
+def print_memory_consumer(all_memory_consumers: Dict[str, MemoryConsumer]) -> None:
+    fmt1 = '{0: <20}'  # format string with width 20
+    fmt2 = '{0: <10}'
+    print(fmt1.format('Memory Consumer') + ' : ' + fmt2.format('Color') + ' : ' + fmt2.format('Address Space'))
+    print("=" * 49)
     for name, memory_consumer in all_memory_consumers.items():
-        print(fmt.format(name) + ": " + str(memory_consumer.get_color()))
+        print(fmt1.format(name) + " : "
+              + fmt2.format(str(memory_consumer.get_color())) + ' : '
+              + fmt1.format(str(memory_consumer.get_address_space())))
 
 
 ###############################################################################
@@ -255,7 +258,7 @@ def main():
 
     assign_memory_consumer_colors(all_memory_consumers, interference_domains, l3cache, minimize_colors=True)
 
-    print_memory_consumer_colors(all_memory_consumers)
+    print_memory_consumer(all_memory_consumers)
 
     # DONE 1: must somehow model shared memory (channels)
     # TODO 2: assign_memory_consumer_colors is too naive, list of interference domains don't have to be disjunct.
