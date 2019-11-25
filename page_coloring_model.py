@@ -126,6 +126,10 @@ class MemoryConsumer:
         return self.address_space
 
 
+# TODO: Page coloring possible with kernel addresses?
+class Kernel(MemoryConsumer):
+    pass
+
 
 class Subject(MemoryConsumer):
     # A subject represents a running instance of a component on top of a SK.
