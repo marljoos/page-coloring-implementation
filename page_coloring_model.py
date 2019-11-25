@@ -25,12 +25,19 @@ PAGE_SIZE = 4096
 NUM_CPUS = 4
 
 
-# TODO: Example model of a cache
-class L3Cache:
-    def __init__(self):
-        self.total_capacity = 6 * (1024 ** 2)
-        self.associativity = 12
-        self.cacheline_capacity = 64
+class Cache:
+    """Description of a CPU cache."""
+    def __init__(self, total_capacity, associativity, cacheline_capacity, page_size=4096):
+        """
+        Args:
+            total_capacity (int): Total capacity of cache in bytes.
+            associativity (int): Number of cache lines of a set in a cache.
+            cacheline_capacity (int): Number of Bytes a cache line can store.
+            page_size (int): Page size in bytes.
+        """
+        self.total_capacity = total_capacity
+        self.associativity = associativity
+        self.cacheline_capacity = cacheline_capacity
         self.sets = self.total_capacity / (self.associativity * self.cacheline_capacity)
 
         # The access of one page frame affects several sets of a cache.
@@ -39,7 +46,7 @@ class L3Cache:
         # We assume that the first $cacheline_capacity bytes of the page frame is allocated
         # to the first set of the cache, the second $cacheline_capacity bytes to
         # the second set etc. #ASSMS-CACHE-MAPPING
-        self.affected_sets_per_page = PAGE_SIZE / self.cacheline_capacity
+        self.affected_sets_per_page = page_size / self.cacheline_capacity
 
         # All by one page frame affected sets are assigned to one color.
         # We assume that a page frame owns the whole affected set even if it actually
@@ -47,7 +54,7 @@ class L3Cache:
         # Depending on the replacement policy of the cache you in theory could use the
         # other cache lines for other colors as long other consumed cache lines aren't replaced.
         # So we assume a strict form of "coloring strategy" here. #ASSMS-COLORING-STRATEGY
-        self.colors = self.sets / (PAGE_SIZE / self.cacheline_capacity)
+        self.colors = self.sets / (page_size / self.cacheline_capacity)
 
         # We assume that all numbers defined here must be integer (no floats), otherwise there is something wrong
         # ASSMS-CACHE-PROPS-ONLY-INTS
@@ -242,7 +249,10 @@ def main():
         {channels['UApp to TApp'], channels['TApp to UApp']}
     ]
 
-    l3cache = L3Cache()
+    # TODO: Description of cpu_execution_domain.
+    # TODO: Use System instead of one single L3 cache
+    l3cache = Cache(total_capacity=6 * (1024 ** 2), associativity=12, cacheline_capacity=64)
+
     assign_memory_consumer_colors(all_memory_consumers, interference_domains, l3cache, minimize_colors=True)
 
     print_memory_consumer_colors(all_memory_consumers)
