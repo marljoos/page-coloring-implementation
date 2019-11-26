@@ -304,8 +304,9 @@ class Subject(MemoryConsumer, Executable):
 
 
 class Channel(MemoryConsumer):
-    # A channel represents an unidirectional communication relationship between
-    # a source subject and a target subject and as well has a memory requirement (in Byte).
+    """A channel represents an unidirectional communication relationship between
+    a source subject and a target subject and as well has a memory requirement (in Byte).
+    """
 
     def __init__(self, memsize, source: Subject, target: Subject):
         super().__init__(memsize)
