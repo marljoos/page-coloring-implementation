@@ -15,21 +15,128 @@ integrated into a separation kernel (SK) build system.
 
 
 # TODO: Specification of bootstrap processor needed?
-class System:
-    """Description of a system which consists of CPU cores, main memory and (multiple layers) of caches."""
-    def __init__(self, cpu_cache_config, page_size=4096):
+class Hardware:
+    """Description of a hardware system which consists of CPU cores, main memory and (multiple layers) of caches."""
+
+    class CPU:
+        cpu_namespace = []
+        cpu_ctr = 0
+
+        def __init__(self, name: str = None):
+            if name is None:
+                name = str(Hardware.CPU.cpu_ctr)
+                Hardware.CPU.cpu_ctr += 1
+            assert name not in Hardware.CPU.cpu_namespace, "CPU core names must be unique."
+            Hardware.CPU.cpu_namespace.append(name)
+            self.name = name
+
+        def __str__(self):
+            return "CPU_" + self.name
+
+    class CPUCacheConfig:
+        def __init__(self,
+                     caches: List[List['Cache']],
+                     cpu_cores: List['CPU'],
+                     cache_cpu_mappings: List[Dict['Cache', 'CPU']]):
+            """
+            Args:
+                caches: List of list of caches, where the first elements designates the list of L1 caches,
+                the second elements, designates the list of L2 caches, etc.
+                cpu_cores: List of CPU cores of the system.
+                cache_cpu_mappings: List of mappings (in form of a dictionary) from a cache to a CPU core.
+                The first element designates the mappings of the L1 caches, the second element the mappings of the L2
+                caches etc.
+            """
+
+            all_caches_of_all_levels = [cache for caches_of_one_level in caches for cache in caches_of_one_level]
+            assert len(all_caches_of_all_levels) == len(set(all_caches_of_all_levels)), "All caches must be unique."
+            assert len(cpu_cores) == len(set(cpu_cores)), "All CPU cores must be unique."
+            assert len(caches) == len(cache_cpu_mappings),\
+                "Number of cache levels (L1, L2, ...) is number of mappings (L1->CPU, L2->CPU, ...)."
+            all_mappings_in_one_dict = \
+                {cache: cpu for mapping in cache_cpu_mappings for cache, cpu in mapping.items()}
+            assert all((cache in all_mappings_in_one_dict) for cache in all_caches_of_all_levels),\
+                "Each cache must be assigned to a CPU core."
+
+            # We also assume that the caches of one cache level are structurally the same.
+            # So it's forbidden to have one L1 cache which is flushed, while others are not flushed,
+            # or one L2 cache which has a cacheline_capacity of 64, while another L2 cache has not.
+            # #ASSMS-STRUCTURALLY-SAME-CACHES-ONE-SAME-LEVEL-1
+
+            self.caches = caches
+            self.cpu_cores = cpu_cores
+            self.cpu_cache_mappings = cache_cpu_mappings
+
+        def get_caches(self):
+            """
+            Returns:
+                List[List[Cache]]: The list of list of caches.
+            """
+            return self.caches
+
+        def get_cpu_cores(self):
+            """
+            Returns:
+                List[CPU] : List of cpu cores.
+            """
+            return self.cpu_cores
+
+    class SystemPageColor:
+        """A system page color is a tuple of CPU and int whereas the first element designates a CPU core
+        and the second element designates a usable page color.
+
+        E. g. (CPU_0, 0), (CPU_1, 3), (CPU_3, 127) are valid system page colors on a system with three CPU cores
+        and 128 usable page colors."""
+        def __init__(self, cpu: 'Hardware.CPU', page_color: int):
+            self.cpu = cpu
+            self.page_color = page_color
+
+        def __str__(self):
+            return str((str(self.cpu), self.page_color))
+
+    def __init__(self, cpu_cache_config: CPUCacheConfig, page_size: int=4096):
         """
         Args:
-            cpu_cache_config (dict): Complex data structure which describes CPU cores, caches and their mappings to the
+            cpu_cache_config: Complex data structure which describes CPU cores, caches and their mappings to the
             CPU cores.
-            page_size (int): Page size in bytes.
+            page_size: Page size in bytes.
         """
         # TODO: Implement initialization
-        pass
+        self.cpu_cache_config = cpu_cache_config
 
+    def get_number_of_usable_colors(self):
+        """
+        Returns the number of page colors which can practically be used to separate execution contexts/subjects to
+        mitigate cache side-channels. Note that this number does not reflect maximum number of page colors
+        when only considering the biggest last-level cache.
 
-class CPU:
-    pass
+        Returns:
+            int: Number of page colors which can practically be used to separate execution contexts/subjects.
+        """
+        colors_of_one_cache = 0
+        for caches_of_same_level in self.cpu_cache_config.get_caches():
+            colors_of_one_cache = caches_of_same_level[0].get_colors()
+            if caches_of_same_level[0].get_flushed():
+                continue
+            else:
+                break
+
+        assert colors_of_one_cache > 0
+        return colors_of_one_cache*len(self.cpu_cache_config.get_cpu_cores())
+
+    def get_all_system_page_colors(self):
+        """Returns the list of all system page colors sorted by page color (int).
+
+        Returns:
+            List[SystemPageColor]: List of all system page colors sorted by page color (int), so that it's easy to
+                distribute system page colors of all CPU core equally:
+                (CPU_0,0), (CPU_1,0), (CPU_0, 1), (CPU_1, 1), ...
+        """
+        # (CPU_0,0), (CPU_1,0), (CPU_0, 1), (CPU_1, 1), ...
+        all_system_page_colors = [Hardware.SystemPageColor(cpu, color)
+                                  for color in range(self.get_number_of_usable_colors())
+                                  for cpu in self.cpu_cache_config.get_cpu_cores()]
+        return all_system_page_colors
 
 
 class Cache:
@@ -92,7 +199,7 @@ class MemoryConsumer:
         self.memsize = memsize
         self.color = None
 
-    def set_color(self, color):
+    def set_color(self, color: Hardware.SystemPageColor):
         self.color = color
 
     def get_color(self):
@@ -269,37 +376,35 @@ def main():
     # Number of CPU cores
     NUM_CPUS = 4
 
-    cpu_cores = [CPU() for _ in range(0, NUM_CPUS)]
+    cpu_cores = [Hardware.CPU() for _ in range(0, NUM_CPUS)]
     l1_caches = \
-        [Cache(total_capacity=(32 * 1024), associativity=8, cacheline_capacity=64, page_size=PAGE_SIZE)
+        [Cache(total_capacity=(32 * 1024), associativity=8, cacheline_capacity=64, flushed=True, page_size=PAGE_SIZE)
          for _ in range(0, len(cpu_cores))]
     l2_caches = \
         [Cache(total_capacity=(256 * 1024), associativity=8, cacheline_capacity=64, page_size=PAGE_SIZE)
          for _ in range(0, len(cpu_cores)//2)]
     l3_caches = [Cache(total_capacity=6 * (1024 ** 2), associativity=12, cacheline_capacity=64, page_size=PAGE_SIZE)]
 
-    # TODO: System must check if cpu_cache_config is valid (validity has to be defined)
-    # Definition of CPU cores and Caches and their mappings to each other
-    cpu_cache_config = {
-        'cpu_cores': cpu_cores,
-        'caches': [l1_caches, l2_caches, l3_caches],  # 1st element -> L1 caches, 2nd element -> L2 caches, etc.
-        'cpu_cache_mapping': [  # 1st element -> L1 cache mappings, 2nd element -> L2 cache mappings, etc.
+    cpu_cache_config = Hardware.CPUCacheConfig(
+        caches=[l1_caches, l2_caches, l3_caches],
+        cpu_cores=cpu_cores,
+        cache_cpu_mappings=[  # 1st element -> L1 cache mappings, 2nd element -> L2 cache mappings, etc.
             # one dedicated L1 cache per CPU core
-            [(cpu, l1_cache) for cpu, l1_cache in zip(cpu_cores, l1_caches)],
-            # first two CPU cores get the same L2 cache, last two CPU cores get the other L2 cache
+            {l1_cache: cpu for (cpu, l1_cache) in zip(cpu_cores, l1_caches)},
             # assumes two L2 caches #ASSMS-CACHE-CONFIG-1
-            [(cpu, l2_cache) for cpu, l2_cache
-             in zip(cpu_cores, [l2_caches[0], l2_caches[0], l2_caches[1], l2_caches[1]])],
+            {l2_cache: cpu for (cpu, l2_cache)
+             in zip(cpu_cores, [l2_caches[0], l2_caches[0], l2_caches[1], l2_caches[1]])},
             # every CPU core gets the same L3 cache
             # assumes one L3 cache for all CPU cores #ASSMS-CACHE-CONFIG-2
-            [(cpu, l3_cache) for cpu, l3_cache in zip(cpu_cores, cycle(l3_caches))]
+            {l3_cache: cpu for (cpu, l3_cache) in zip(cpu_cores, cycle(l3_caches))}
         ]
-    }
+    )
+
+    hardware = Hardware(cpu_cache_config=cpu_cache_config, page_size=PAGE_SIZE)
 
     assert(len(l2_caches) == 2)     # #ASSMS-CACHE-CONFIG-1
     assert(len(l3_caches) == 1)     # #ASSMS-CACHE-CONFIG-2
 
-    system = System(cpu_cache_config=cpu_cache_config, page_size=PAGE_SIZE)
     # Specification of subjects and their memory requirements.
     subjects = {
         'Untrusted App 1': Subject(2 * PAGE_SIZE),
