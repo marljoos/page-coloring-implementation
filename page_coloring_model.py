@@ -180,6 +180,39 @@ class Cache:
         self.colors = int(self.colors)
 
 
+
+class Executable:
+    """Designates entities which are executed on the system (e. g. kernel, subjects)."""
+    def __init__(self):
+        self.classification = None
+        self.compartment = None
+
+    def set_security_label(self, classification: int, compartment: Set[int]):
+        """
+        Set the security label of an executable entity. The assignment of security labels to executable entities
+        effectively establishes a lattice of security labels which establishes a security hierarchy between
+        labeled entities. A security label can be constructed from a classification and a set of codewords which
+        defines a compartment.
+        Entity_X has a higher or equal security clearance than Entity_Y
+            <=> Entity_X.classification <= Entity_X.classification AND
+                Entity_X.compartment is the same set or a proper superset of Entity_Y.compartment
+
+        Args:
+            classification: The classification of the executable entity. The *lower* the higher the classification.
+                E. g. use 0=TOP SECRET, 1=SECRET, 2=UNCLASSIFIED, ...
+            compartment: Set of codewords which defines a compartment.
+                E. g. use something like {0, 1, 2} for {CRYPTO, FOREIGN, SECRET_PROJECTX}, and
+                {0,2} for {CRYPTO, SECRET_PROJECTX}
+        """
+        self.classification = classification
+        self.compartment = compartment
+
+    def get_security_label(self):
+        assert (self.classification is not None) and (self.compartment is not None),\
+            "Classification and compartment must both be defined."
+        return self.classification, self.compartment
+
+
 class MemoryConsumer:
     # A MemoryConsumer represents an object like subjects or channels
     # which want to consume a certain memory of size $memsize > 0
@@ -233,14 +266,15 @@ class MemoryConsumer:
         return self.address_space
 
 
-# TODO: Page coloring possible with kernel addresses?
-class Kernel(MemoryConsumer):
+# We assume that Kernel memory pages can also be colored easily. #ASSMS-KERNEL-PAGE-COLORING
+class Kernel(MemoryConsumer, Executable):
     pass
 
 
-class Subject(MemoryConsumer):
-    # A subject represents a running instance of a component on top of a SK.
-    # It has a memory requirement (in Byte) and may have channels to other subjects.
+class Subject(MemoryConsumer, Executable):
+    """A subject represents a running instance of a component on top of a SK.
+
+    It has a memory requirement (in Byte) and may have channels to other subjects."""
 
     inchannels = []
     outchannels = []
