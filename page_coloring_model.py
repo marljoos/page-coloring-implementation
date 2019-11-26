@@ -290,17 +290,43 @@ class Subject(MemoryConsumer, Executable):
 
     It has a memory requirement (in Byte) and may have channels to other subjects."""
 
-    inchannels = []
-    outchannels = []
+    def __init__(self, memsize):
+        super().__init__(memsize)
+
+        self.inchannels: Dict[Subject, List[Channel]] = {}
+        self.outchannels: Dict[Subject, List[Channel]] = {}
 
     def add_inchannel(self, channel: 'Channel'):
-        self.inchannels.append(channel)
+        from_subject = channel.get_source()
+        if from_subject not in self.inchannels:
+            self.inchannels[from_subject] = [channel]
+        else:
+            self.inchannels[from_subject].append(channel)
 
     def add_outchannel(self, channel: 'Channel'):
-        self.outchannels.append(channel)
+        to_subject = channel.get_target()
+        if to_subject not in self.outchannels:
+            self.outchannels[to_subject] = [channel]
+        else:
+            self.outchannels[to_subject].append(channel)
 
     def get_channels(self):
-        return self.inchannels + self.outchannels
+        """Returns all in and out channels of this s
+
+        Returns:
+            List[Channels]: List of all channels of subject.
+        """
+        all_inchannels = [channel for channel_list in self.inchannels.values() for channel in channel_list]
+        all_outchannels = [channel for channel_list in self.outchannels.values() for channel in channel_list]
+        return all_inchannels + all_outchannels
+
+    def get_inoutchannels(self, subject: 'Subject'):
+        """Returns all out channels to given subject and all in channels from given subject.
+
+        Returns:
+            List[Channel]: All out channels to given subject and all in channels from given subject.
+        """
+        return self.inchannels[subject] + self.outchannels[subject]
 
 
 class Channel(MemoryConsumer):
