@@ -224,19 +224,21 @@ class Executable:
 
 
 class MemoryConsumer:
-    # A MemoryConsumer represents an object like subjects or channels
-    # which want to consume a certain memory of size $memsize > 0
-    # and may get assigned an address space of size $memsize and a color
-    # for this address space.
+    """A MemoryConsumer represents memory consuming objects like subjects or channels.
 
-    def __init__(self, memsize, page_size=4096):
+    A MemoryConsumer consumes certain memory of size $memsize > 0
+    and may get assigned an address space of size $memsize and a color
+    for this address space.
+    """
+
+    def __init__(self, memsize: int, page_size: int = 4096):
         """
         Args:
-            memsize (int): Memory size of memory consumer in bytes.
-            page_size (int): Page size in bytes.
+            memsize: Memory size of memory consumer in bytes.
+            page_size: Page size in bytes.
         """
-        assert memsize % page_size == 0  # memory size of memory consume must be a multiple of page size
-        assert memsize > 0
+        assert memsize % page_size == 0, "Memory size of memory consume must be a multiple of page size."
+        assert memsize > 0, "Memory size must be positive."
 
         self.address_space = None
         self.memsize = memsize
@@ -249,9 +251,11 @@ class MemoryConsumer:
         return self.color
 
     def set_address_space(self, address_space: List[range]):
-        assert len(address_space) > 0
-        assert MemoryConsumer.__address_space_size(address_space) == self.memsize
-        assert MemoryConsumer.__address_space_not_overlapping(address_space)
+        assert len(address_space) > 0, "There must be at least one range of addresses specified."
+        assert MemoryConsumer.__address_space_size(address_space) == self.memsize,\
+            "Size of specified address space must comply to the memory requirement/size of the MemoryConsumer."
+        assert MemoryConsumer.__address_space_not_overlapping(address_space),\
+            "Address ranges must not be overlapping."
 
         self.address_space = address_space
 
