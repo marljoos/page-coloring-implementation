@@ -141,14 +141,19 @@ class Hardware:
 
 class Cache:
     """Description of a CPU cache."""
-    def __init__(self, total_capacity, associativity, cacheline_capacity, page_size=4096):
+
+    def __init__(self, total_capacity: int, associativity: int, cacheline_capacity: int, flushed: bool = False,
+                 page_size: int = 4096):
         """
         Args:
-            total_capacity (int): Total capacity of cache in bytes.
-            associativity (int): Number of cache lines of a set in a cache.
-            cacheline_capacity (int): Number of Bytes a cache line can store.
-            page_size (int): Page size in bytes.
+            total_capacity: Total capacity of cache in bytes.
+            associativity: Number of cache lines of a set in a cache.
+            cacheline_capacity: Number of Bytes a cache line can store.
+            flushed: True if cache is flushed on context/subject switch. This effectively enables the usage of
+                            colors of higher level caches.
+            page_size: Page size in bytes.
         """
+        self.flushed = flushed
         self.total_capacity = total_capacity
         self.associativity = associativity
         self.cacheline_capacity = cacheline_capacity
@@ -171,14 +176,19 @@ class Cache:
         self.colors = self.sets / (page_size / self.cacheline_capacity)
 
         # We assume that all numbers defined here must be integer (no floats), otherwise there is something wrong
-        # ASSMS-CACHE-PROPS-ONLY-INTS
-        assert (self.sets.is_integer())
-        assert (self.affected_sets_per_page.is_integer())
-        assert (self.colors.is_integer())
+        # #ASSMS-CACHE-PROPS-ONLY-INTS
+        assert (self.sets.is_integer()), "#ASSMS-CACHE-PROPS-ONLY-INTS"
+        assert (self.affected_sets_per_page.is_integer()), "#ASSMS-CACHE-PROPS-ONLY-INTS"
+        assert (self.colors.is_integer()), "#ASSMS-CACHE-PROPS-ONLY-INTS"
         self.sets = int(self.sets)
         self.affected_sets_per_page = int(self.affected_sets_per_page)
         self.colors = int(self.colors)
 
+    def get_colors(self):
+        return self.colors
+
+    def get_flushed(self):
+        return self.flushed
 
 
 class Executable:
