@@ -3,7 +3,7 @@
 
 import logging
 import sys
-from typing import List, Dict, Set  # need this for specifying List/Dict/Set types for type hints
+from typing import List, Dict, Set, Tuple  # need this for specifying List/Dict/Set types for type hints
 from itertools import cycle
 
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
