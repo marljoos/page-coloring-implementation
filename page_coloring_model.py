@@ -6,7 +6,7 @@ import sys
 from typing import List, Dict, Set  # need this for specifying List/Dict/Set types for type hints
 from itertools import cycle
 
-logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
+logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 
 """
 This script models certain aspects of a page-coloring algorithm which will be
