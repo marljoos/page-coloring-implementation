@@ -670,8 +670,8 @@ def main():
     #         dürfen, dann gilt das implizit auch für ihre Channels untereinander.
     #         Ggf. einfach eine Warning ausgeben, dass Farben gespart werden könnten, statt implizit die Channels in
     #         die gleiche interference domain zuzuordnen.
-    # TODO 6: Take care of CPUs.
-    # TODO 7: Take care of several level of caches (L2, L1).
+    # DONE 6: Take care of CPUs.
+    # DONE 7: Take care of several level of caches (L2, L1).
     # TODO 8: Take care of CPU specific caches (L1 data & instruction cache).
     # TODO 9: Take care of complex indexing in L3 cache.
 
