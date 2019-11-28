@@ -485,36 +485,126 @@ def main():
     hardware = Hardware(cpu_cache_config=cpu_cache_config, page_size=PAGE_SIZE)
 
 
+    # We specify an example system which not only consists of its hardware
+    # but also of its memory consumers which either reserve a specific address range or have a
+    # memory size requirement specified in bytes.
+    # Memory consumers are the Kernel, Subjects, Channels and also some special reserved address spaces.
+    # The software of our example system consists on the one hand of the Kernel, an App and a Crypto subject which
+    # all three are considered trusted and on the other hand several of untrusted Linux subjects.
+    # To make it more realistic, there are for channels which connects some of the subjects to each other as shown here:
+    # [some_reserved_address_space] | (Kernel) | (Trusted App) <-> (Trusted Crypto) <-> (Untrusted Linux VS-Vertr)
+    #                                                              (Trusted Crypto) <-> (Untrusted Linux VS-NfD-1)
+    #                                                              (Trusted Crypto) <-> (Untrusted Linux VS-NfD-2)
+    #                                                              (Trusted Crypto) <-> (Untrusted Linux Public)
+    #                                                      (Untrusted Linux Public) <-> (Untrusted App)
+    # TODO: model potentially reserved address space as MemoryConsumer
+
+    kernel = Kernel(16 * PAGE_SIZE)
+
     # Specification of subjects and their memory requirements.
     subjects = {
-        'Untrusted App 1': Subject(2 * PAGE_SIZE),
-        'Linux': Subject(4 * PAGE_SIZE),
-        'Crypto': Subject(8 * PAGE_SIZE),
-        'Trusted Subject': Subject(10 * PAGE_SIZE),
-        'Trusted App 2': Subject(11 * PAGE_SIZE)
+        'Trusted App':                Subject(2 * PAGE_SIZE),
+        'Trusted Crypto':             Subject(4 * PAGE_SIZE),
+        'Untrusted Linux VS-Vertr':   Subject(8 * PAGE_SIZE),
+        'Untrusted Linux VS-NfD-1':   Subject(8 * PAGE_SIZE),
+        'Untrusted Linux VS-NfD-2':   Subject(8 * PAGE_SIZE),
+        'Untrusted Linux Public':     Subject(8 * PAGE_SIZE),
+        'Untrusted App':              Subject(8 * PAGE_SIZE),
     }
 
-    # Specification of allowed unidirectional communcation relationships (channels)
+    # Specification of allowed unidirectional communication relationships (channels)
     # between two subjects and the memory requirement of the channel.
     channels = {
-        'UApp to TApp': Channel(6 * PAGE_SIZE, subjects['Untrusted App 1'], subjects['Trusted App 2']),
-        'TApp to UApp': Channel(1 * PAGE_SIZE, subjects['Trusted App 2'], subjects['Untrusted App 1'])
+        'Trusted App -> Trusted Crypto': Channel(6 * PAGE_SIZE, subjects['Trusted App'], subjects['Trusted Crypto']),
+        'Trusted App <- Trusted Crypto': Channel(6 * PAGE_SIZE, subjects['Trusted Crypto'], subjects['Trusted App']),
+        ##
+        'Trusted Crypto -> Untrusted Linux VS-Vertr':
+            Channel(6 * PAGE_SIZE, subjects['Trusted Crypto'], subjects['Untrusted Linux VS-Vertr']),
+        'Trusted Crypto <- Untrusted Linux VS-Vertr':
+            Channel(6 * PAGE_SIZE, subjects['Untrusted Linux VS-Vertr'], subjects['Trusted Crypto']),
+        ##
+        'Trusted Crypto -> Untrusted Linux VS-NfD-1':
+            Channel(6 * PAGE_SIZE, subjects['Trusted Crypto'], subjects['Untrusted Linux VS-NfD-1']),
+        'Trusted Crypto <- Untrusted Linux VS-NfD-1':
+            Channel(6 * PAGE_SIZE, subjects['Untrusted Linux VS-NfD-1'], subjects['Trusted Crypto']),
+        ##
+        'Trusted Crypto -> Untrusted Linux VS-NfD-2':
+            Channel(6 * PAGE_SIZE, subjects['Trusted Crypto'], subjects['Untrusted Linux VS-NfD-2']),
+        'Trusted Crypto <- Untrusted Linux VS-NfD-2':
+            Channel(6 * PAGE_SIZE, subjects['Untrusted Linux VS-NfD-2'], subjects['Trusted Crypto']),
+        ##
+        'Trusted Crypto -> Untrusted Linux Public':
+            Channel(6 * PAGE_SIZE, subjects['Trusted Crypto'], subjects['Untrusted Linux Public']),
+        'Trusted Crypto <- Untrusted Linux Public':
+            Channel(6 * PAGE_SIZE, subjects['Untrusted Linux Public'], subjects['Trusted Crypto']),
+        ##
+        'Untrusted Linux Public -> Untrusted App':
+            Channel(2 * PAGE_SIZE, subjects['Untrusted Linux Public'], subjects['Untrusted App']),
+        'Untrusted Linux Public <- Untrusted App':
+            Channel(2 * PAGE_SIZE, subjects['Untrusted Linux Public'], subjects['Untrusted App']),
     }
 
-    all_memory_consumers = {**subjects, **channels}
+    all_memory_consumers = {'Kernel': kernel, **subjects, **channels}
 
-    # Specification of interference domains.
+    # BEGIN: Interference domains specification
+    # Example usage of the interference domains method.
     # An interference domain is a set of memory consumers whose memory regions are allowed to
     # interfere with each others in cache(s). 
     # Interference domains effectively lead to less color usage
     # since members of the same interference domain may share the same color.
+    # Non specified memory consumers get exclusive colors.
     interference_domains = [
-        {subjects['Untrusted App 1'], subjects['Linux']},
-        {subjects['Crypto']},
-        {subjects['Trusted Subject']},
-        {channels['UApp to TApp'], channels['TApp to UApp']}
+       {  # All untrusted subjects and their channels may share the same color
+        subjects['Untrusted Linux Public'],
+        subjects['Untrusted App'],
+        *subjects['Untrusted Linux Public'].get_channels(),
+        *subjects['Untrusted App'].get_channels()
+        },
+       {  # The address space of the kernel and the trusted subjects may share the same color
+        subjects['Trusted App'], subjects['Trusted Crypto'], kernel
+       }
     ]
 
+    # END: Interference domains specification
+
+    # BEGIN: Security clearance specification
+    # Example usage of the security labels method.
+    # Building a security clearance hierarchy like this:
+    #           Kernel
+    #           /    \
+    # Trusted App | Trusted Crypto
+    #           \    /
+    #       Linux VS-Vertr
+    #           /    \
+    #   L VS-NfD-1 | L VS-NfD-1
+    #           \    /
+    # { Linux Public, Untrusted App }
+    #
+    # Properties:
+    #  - No cache-interference with upper classifications (e. g. Trusted App to Kernel)
+    #  - No cache-interference with other compartments/partitions (e. g. Trusted App to Trusted Crypto)
+
+    class C12n:  # Classification
+        TOP_LEVEL, LEVEL_2, LEVEL_3, LEVEL_4, LEVEL_5 = range(0, 5)
+
+    class Partition:
+        ONE, TWO = range(0, 2)
+
+    s = subjects
+
+    kernel.                         set_security_label(C12n.TOP_LEVEL,  {Partition.ONE, Partition.TWO})
+    s['Trusted App'].               set_security_label(C12n.LEVEL_2,    {Partition.ONE})
+    s['Trusted Crypto'].            set_security_label(C12n.LEVEL_2,    {Partition.TWO})
+    s['Untrusted Linux VS-Vertr'].  set_security_label(C12n.LEVEL_3,    {Partition.ONE, Partition.TWO})
+    s['Untrusted Linux VS-NfD-1'].  set_security_label(C12n.LEVEL_4,    {Partition.ONE})
+    s['Untrusted Linux VS-NfD-2'].  set_security_label(C12n.LEVEL_4,    {Partition.TWO})
+    s['Untrusted Linux Public'].    set_security_label(C12n.LEVEL_5,    set())
+    s['Untrusted App'].             set_security_label(C12n.LEVEL_5,    set())
+
+    # END: Security clearance specification
+
+    logging.info("Color assignment (naive method):")
+    ColorAssigner.assign_colors_by_naive(hardware=hardware, all_memory_consumers=all_memory_consumers)
     # TODO: Use System instead of one single L3 cache
     l3cache = Cache(total_capacity=6 * (1024 ** 2), associativity=12, cacheline_capacity=64)
 
