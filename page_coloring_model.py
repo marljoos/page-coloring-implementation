@@ -514,6 +514,12 @@ def main():
 
     hardware = Hardware(cpu_cache_config=cpu_cache_config, page_size=PAGE_SIZE)
 
+    logging.info("Number of usable colors: " + str(hardware.get_number_of_usable_colors()))
+
+    # DEBUG: Print all system page colors.
+    # logging.info("System page colors:")
+    # for system_page_color in all_system_page_colors:
+    #    logging.info(system_page_color)
 
     # We specify an example system which not only consists of its hardware
     # but also of its memory consumers which either reserve a specific address range or have a
