@@ -662,19 +662,6 @@ def main():
 
     # TODO: assign_address_spaces(all_memory_consumers)
 
-    # DONE 1: must somehow model shared memory (channels)
-    # DONE 2: assign_memory_consumer_colors is too naive, list of interference domains don't have to be disjoint.
-    # NOT DONE 3: State assumptions. Split L1 instruction cache & L1 data cache, complex indexing.
-    # TODO 4: Take care of reserved memory.
-    # TODO 5: Noch einmal über interference domains nachdenken. Wenn sich Subjekt 1 und Subjekt 2 gegenseitig stören
-    #         dürfen, dann gilt das implizit auch für ihre Channels untereinander.
-    #         Ggf. einfach eine Warning ausgeben, dass Farben gespart werden könnten, statt implizit die Channels in
-    #         die gleiche interference domain zuzuordnen.
-    # DONE 6: Take care of CPUs.
-    # DONE 7: Take care of several level of caches (L2, L1).
-    # TODO 8: Take care of CPU specific caches (L1 data & instruction cache).
-    # TODO 9: Take care of complex indexing in L3 cache.
-
 
 if __name__ == "__main__":
     main()
