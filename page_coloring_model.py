@@ -369,78 +369,100 @@ def print_memory_consumer(all_memory_consumers: Dict[str, MemoryConsumer]) -> No
     # TODO: Print number of used and unassigned colors.
 
 
-def assign_memory_consumer_colors(
-        all_memory_consumers: Dict[str, MemoryConsumer],
-        interference_domains: List[Set[MemoryConsumer]],
-        cache,
-        minimize_colors=False):
-    # Precondition 1: The sets in interference_domains must not be pairwise subsets of
-    #                 each other. Otherwise the color counter may yield an incorrect value.
-    #                 #ASSMS-INTERFERENCE-DOMAINS
-    #                 Example:
-    #                   - [ { subj1, subj2 }, { subj1, subj2, subj3 } ] is not allowed.
-    #                     Color counter would result in color-counter = 2 instead of color-counter = 1 of all subjects.
-    #                   - [ { subj1, subj2 }, { subj2, subj3 } ] is allowed.
-    #                     Must result in 2 colors. E. g. color 1 to subj1, color 2 to { subj2, subj3 }.
-    #                 TODO: Überarbeiten, funktioniert nicht mit
-    #                       [ { subj1, subj2 }, { subj2, subj3 } , { subj1, subj3 } ]
-    #                       würde aktuell zu 2 genutzten Farben führen, obwohl der color counter 3 ist.
-    #                       subj1.color = subj2.color = 1, subj2.color = subj3.color = 2, subj1.color = subj3.color = 3,
-    #                       genutzte Farben = { 2,3 }
-    # Idea:
-    # 1. Get number of all assignable colors (dependent on cache)
-    # 2. Get upper bound of required colors (len(all_memory_consumers))
-    # 3. If len(all_memory_consumers) < all_assignable colors and not MINIMIZE_COLORS:
-    #       assign colors incrementally
-    #    else:
-    #       1. iterate through interference domains
-    #           1. assign same color to memory consumers in same interference domain
-    #              (if a memory consumer was colored before, it's color gets overwritten)
-    #           2. remove colored memory consumers from all_memory_consumers
-    #           3. increase assigned_color_counter to later assure
-    #              it is small than the number of all assignable colors
-    #           4. If assigned_color_counter >= number of all assignable colors
-    #              return EXCEPTION (color exhaustion)
-    #       2. assign rest of colors incrementally to rest of all_memory_consumers and
-    #          assure that there is no color exhaustion
+class ColorAssigner:
+    """Responsible for assigning colors to MemoryConsumers."""
 
-    num_assignable_colors = cache.colors
-    num_max_required_colors = len(all_memory_consumers)
+    class ColorExhaustion(Exception):
+        def __init__(self):
+            default_message = "There are not enough colors to distribute. "\
+                              "Maybe another color assignment method can help."
+            super().__init__(default_message)
 
-    color_ctr = 0
-
-    # CAUTION: This assumes that all memory consumer colors are undefined before. #ASSMS-UNDEFINED-COLORS
-    if num_max_required_colors <= num_assignable_colors and not minimize_colors:
+    @staticmethod
+    def reset_colors(all_memory_consumers: Dict[str, MemoryConsumer]):
         for memory_consumer in all_memory_consumers.values():
-            memory_consumer.set_color(color_ctr)
-            color_ctr += 1
-    else:
+            memory_consumer.set_color(None)
+
+    @staticmethod
+    def assign_colors_by_naive(hardware: Hardware, all_memory_consumers: Dict[str, MemoryConsumer]):
+        """
+        Distributes - if possible - system page colors to all memory consumers by iterating through all system page colors
+        and distributing colors from all CPU cores equally. Raises an exception if it's not possible.
+
+        Raises:
+            ColorAssigner.ColorExhaustion: There are not enough colors to distribute.
+        """
+        num_assignable_colors = hardware.get_number_of_usable_colors()
+        num_required_colors = len(all_memory_consumers)
+        all_system_page_colors = hardware.get_all_system_page_colors()
+
+        if num_required_colors > num_assignable_colors:
+            raise ColorAssigner.ColorExhaustion()
+        else:
+            for memory_consumer, color in zip(all_memory_consumers.values(), all_system_page_colors):
+                memory_consumer.set_color(color)
+
+    @staticmethod
+    def assign_color_by_interference_domains(hardware: Hardware, all_memory_consumers: Dict[str, MemoryConsumer],
+                                             interference_domains: List[Set[MemoryConsumer]]):
+        """Assigns colors by interference domains.
+
+        This function does not respect pre-assigned colors of memory consumers. All memory consumer colors
+        must be undefined (None) at beginning of assignment.
+
+        Args:
+            hardware:
+            all_memory_consumers:
+            interference_domains: An interference domain is a set of memory consumers whose memory regions are allowed
+                to interfere with each others in cache(s). Interference domains effectively lead to less color usage
+                since members of the same interference domain may share the same color. Non specified memory consumers
+                get exclusive colors.
+        Raises:
+            ColorAssigner.ColorExhaustion: There are not enough colors to distribute.
+        """
+        #       1. iterate through interference domains
+        #           1. assign same color to memory consumers in same interference domain
+        #              (if a memory consumer was colored before, its color gets overwritten)
+        #           2. remove colored memory consumers from all_memory_consumers
+        #           3. increase assigned_color_counter to later assure
+        #              it is small than the number of all assignable colors
+        #           4. If assigned_color_counter >= number of all assignable colors
+        #              return EXCEPTION (color exhaustion)
+        #       2. assign rest of colors incrementally to rest of all_memory_consumers and
+        #          assure that there is no color exhaustion
+        assert all((memory_consumer.get_color() is None) for memory_consumer in all_memory_consumers.values()),\
+            "The colors of all memory consumers must be undefined."
+
+        def get_next_assignable_color(table: Dict[Hardware.SystemPageColor, int]):
+            for color, counter in table.items():
+                if counter == 0:
+                    return color
+
+            raise ColorAssigner.ColorExhaustion()
+
         all_memory_consumers_values = list(all_memory_consumers.values())
-        used_colors_table = [0 for i in range(0, num_assignable_colors)]
+        color_usage_counter_table = {color: 0 for color in hardware.get_all_system_page_colors()}
 
         for interference_domain in interference_domains:
-            assignable_color = used_colors_table.index(0)  # get lowest color which is unallocated (with 0 uses)
+            assignable_color = get_next_assignable_color(color_usage_counter_table)
             for memory_consumer in interference_domain:
                 if memory_consumer.get_color() is not None:
-                    used_colors_table[memory_consumer.get_color()] -= 1
+                    color_usage_counter_table[memory_consumer.get_color()] -= 1
+
                 memory_consumer.set_color(assignable_color)
-                used_colors_table[assignable_color] += 1
+                color_usage_counter_table[assignable_color] += 1
 
                 all_memory_consumers_values.remove(memory_consumer)
 
         # assign colors to rest of all_memory_consumers_values
         for memory_consumer in all_memory_consumers_values:
-            assignable_color = used_colors_table.index(0)
-            # we assume that colors are undefined see #ASSMS-UNDEFINED-COLORS
-            assert (memory_consumer.get_color() is None)
+            assignable_color = get_next_assignable_color(color_usage_counter_table)
             memory_consumer.set_color(assignable_color)
-            used_colors_table[assignable_color] += 1
+            color_usage_counter_table[assignable_color] += 1
 
-        # count colors which are used (> 0)
-        color_ctr = sum(color > 0 for color in used_colors_table)
-
-    logging.info('Number of used colors: ' + str(color_ctr))
-
+    @staticmethod
+    def assign_color_by_security_labels(hardware: Hardware, all_executables: Dict[str, Executable]):
+        pass
 
 
 ###############################################################################
@@ -554,6 +576,16 @@ def main():
 
     all_memory_consumers = {'Kernel': kernel, **subjects, **channels}
 
+    # Now we have to specify the color assignment method, they're currently three methods:
+    # 1. naive: Just distribute system page colors to each memory consumer so that each CPU cores
+    #           are distributed equally to the memory consumers. It's equivalent when using the interference domains
+    #           method with an empty interference domains list.
+    # 2. with interference domains: Specify sets of memory consumers which may interfere which each other.
+    # 3. with security labels: Assign system page colors according to the security labels of the memory consumers
+    #                          so that no memory consumer can cache-interfere with higher-clearance memory consumers
+    #                          and no memory consumer can cache-interfere with memory consumers with different
+    #                          compartment.
+
     # BEGIN: Interference domains specification
     # Example usage of the interference domains method.
     # An interference domain is a set of memory consumers whose memory regions are allowed to
@@ -613,12 +645,16 @@ def main():
 
     logging.info("Color assignment (naive method):")
     ColorAssigner.assign_colors_by_naive(hardware=hardware, all_memory_consumers=all_memory_consumers)
-    # TODO: Use System instead of one single L3 cache
-    l3cache = Cache(total_capacity=6 * (1024 ** 2), associativity=12, cacheline_capacity=64)
-
-    assign_memory_consumer_colors(all_memory_consumers, interference_domains, l3cache, minimize_colors=True)
 
     print_memory_consumer(all_memory_consumers)
+
+    logging.info("Color assignment (with interference domains method):")
+    ColorAssigner.reset_colors(all_memory_consumers)
+    ColorAssigner.assign_color_by_interference_domains(hardware, all_memory_consumers, interference_domains)
+
+    print_memory_consumer(all_memory_consumers)
+
+    # TODO: assign_address_spaces(all_memory_consumers)
 
     # DONE 1: must somehow model shared memory (channels)
     # DONE 2: assign_memory_consumer_colors is too naive, list of interference domains don't have to be disjoint.
