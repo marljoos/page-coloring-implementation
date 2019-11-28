@@ -351,6 +351,24 @@ class Channel(MemoryConsumer):
 
 ###############################################################################
 
+def print_memory_consumer(all_memory_consumers: Dict[str, MemoryConsumer]) -> None:
+    def print_bar():
+        print("=" * 74)
+
+    fmt1 = '{0: <45}'  # format string with width 20
+    fmt2 = '{0: <10}'
+
+    print_bar()
+    print(fmt1.format('Memory Consumer') + ' : ' + fmt2.format('Color') + ' : ' + fmt2.format('Address Space'))
+    print_bar()
+    for name, memory_consumer in all_memory_consumers.items():
+        print(fmt1.format(name) + " : "
+              + fmt2.format(str(memory_consumer.get_color())) + ' : '
+              + fmt1.format(str(memory_consumer.get_address_space())))
+    print_bar()
+    # TODO: Print number of used and unassigned colors.
+
+
 def assign_memory_consumer_colors(
         all_memory_consumers: Dict[str, MemoryConsumer],
         interference_domains: List[Set[MemoryConsumer]],
@@ -423,16 +441,6 @@ def assign_memory_consumer_colors(
 
     logging.info('Number of used colors: ' + str(color_ctr))
 
-
-def print_memory_consumer(all_memory_consumers: Dict[str, MemoryConsumer]) -> None:
-    fmt1 = '{0: <20}'  # format string with width 20
-    fmt2 = '{0: <10}'
-    print(fmt1.format('Memory Consumer') + ' : ' + fmt2.format('Color') + ' : ' + fmt2.format('Address Space'))
-    print("=" * 49)
-    for name, memory_consumer in all_memory_consumers.items():
-        print(fmt1.format(name) + " : "
-              + fmt2.format(str(memory_consumer.get_color())) + ' : '
-              + fmt1.format(str(memory_consumer.get_address_space())))
 
 
 ###############################################################################
