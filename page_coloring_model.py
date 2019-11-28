@@ -515,7 +515,6 @@ def main():
         {channels['UApp to TApp'], channels['TApp to UApp']}
     ]
 
-    # TODO: Description of cpu_execution_domain.
     # TODO: Use System instead of one single L3 cache
     l3cache = Cache(total_capacity=6 * (1024 ** 2), associativity=12, cacheline_capacity=64)
 
