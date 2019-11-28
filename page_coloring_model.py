@@ -460,6 +460,9 @@ def main():
          for _ in range(0, len(cpu_cores)//2)]
     l3_caches = [Cache(total_capacity=6 * (1024 ** 2), associativity=12, cacheline_capacity=64, page_size=PAGE_SIZE)]
 
+    assert(len(l2_caches) == 2), "#ASSMS-CACHE-CONFIG-1"
+    assert(len(l3_caches) == 1), "#ASSMS-CACHE-CONFIG-2"
+
     cpu_cache_config = Hardware.CPUCacheConfig(
         caches=[l1_caches, l2_caches, l3_caches],
         cpu_cores=cpu_cores,
@@ -477,8 +480,6 @@ def main():
 
     hardware = Hardware(cpu_cache_config=cpu_cache_config, page_size=PAGE_SIZE)
 
-    assert(len(l2_caches) == 2)     # #ASSMS-CACHE-CONFIG-1
-    assert(len(l3_caches) == 1)     # #ASSMS-CACHE-CONFIG-2
 
     # Specification of subjects and their memory requirements.
     subjects = {
