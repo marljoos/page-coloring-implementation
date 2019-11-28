@@ -460,6 +460,10 @@ def main():
          for _ in range(0, len(cpu_cores)//2)]
     l3_caches = [Cache(total_capacity=6 * (1024 ** 2), associativity=12, cacheline_capacity=64, page_size=PAGE_SIZE)]
 
+    logging.info('Number of L1 colors: ' + str(l1_caches[0].get_colors()))
+    logging.info('Number of L2 colors: ' + str(l2_caches[0].get_colors()))
+    logging.info('Number of L3 colors: ' + str(l3_caches[0].get_colors()))
+
     assert(len(l2_caches) == 2), "#ASSMS-CACHE-CONFIG-1"
     assert(len(l3_caches) == 1), "#ASSMS-CACHE-CONFIG-2"
 
