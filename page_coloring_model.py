@@ -391,14 +391,11 @@ class ColorAssigner:
             memory_consumer.set_color(None)
 
     @staticmethod
-    def assign_colors_by_naive(hardware: Hardware, all_memory_consumers: Dict[str, MemoryConsumer]):
-        """
-        Distributes - if possible - system page colors to all memory consumers by iterating through all system page colors
-        and distributing colors from all CPU cores equally. Raises an exception if it's not possible.
+    def get_assignment_by_naive(hardware: Hardware, all_memory_consumers: Dict[str, MemoryConsumer]) -> \
+            Dict[MemoryConsumer, Hardware.SystemPageColor]:
 
-        Raises:
-            ColorAssigner.ColorExhaustion: There are not enough colors to distribute.
-        """
+        assignment = {}
+
         num_assignable_colors = hardware.get_number_of_usable_colors()
         num_required_colors = len(all_memory_consumers)
         all_system_page_colors = hardware.get_all_system_page_colors()
@@ -407,7 +404,21 @@ class ColorAssigner:
             raise ColorAssigner.ColorExhaustion()
         else:
             for memory_consumer, color in zip(all_memory_consumers.values(), all_system_page_colors):
-                memory_consumer.set_color(color)
+                assignment[memory_consumer] = color
+
+        return assignment
+
+    @staticmethod
+    def assign_by_naive(hardware: Hardware, all_memory_consumers: Dict[str, MemoryConsumer]):
+        """
+        Distributes - if possible - system page colors to all memory consumers by iterating through all system page colors
+        and distributing colors from all CPU cores equally. Raises an exception if it's not possible.
+
+        Raises:
+            ColorAssigner.ColorExhaustion: There are not enough colors to distribute.
+        """
+        assignment = ColorAssigner.get_assignment_by_naive(hardware, all_memory_consumers)
+        ColorAssigner._enforce_assignment(assignment)
 
     @staticmethod
     def assign_color_by_interference_domains(hardware: Hardware, all_memory_consumers: Dict[str, MemoryConsumer],
@@ -470,6 +481,12 @@ class ColorAssigner:
     @staticmethod
     def assign_color_by_security_labels(hardware: Hardware, all_executables: Dict[str, Executor]):
         pass
+
+
+    @staticmethod
+    def _enforce_assignment(assignment: Dict[MemoryConsumer, Hardware.SystemPageColor]):
+        for memory_consumer, color in assignment.items():
+            memory_consumer.set_color(color)
 
 
 ###############################################################################
