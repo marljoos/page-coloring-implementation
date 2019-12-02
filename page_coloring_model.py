@@ -191,7 +191,7 @@ class Cache:
         return self.flushed
 
 
-class Executable:
+class Executor:
     """Designates entities which are executed on the system (e. g. kernel, subjects)."""
     def __init__(self):
         self.classification = None
@@ -281,11 +281,11 @@ class MemoryConsumer:
 
 
 # We assume that Kernel memory pages can also be colored easily. #ASSMS-KERNEL-PAGE-COLORING
-class Kernel(MemoryConsumer, Executable):
+class Kernel(MemoryConsumer, Executor):
     pass
 
 
-class Subject(MemoryConsumer, Executable):
+class Subject(MemoryConsumer, Executor):
     """A subject represents a running instance of a component on top of a SK.
 
     It has a memory requirement (in Byte) and may have channels to other subjects."""
@@ -461,7 +461,7 @@ class ColorAssigner:
             color_usage_counter_table[assignable_color] += 1
 
     @staticmethod
-    def assign_color_by_security_labels(hardware: Hardware, all_executables: Dict[str, Executable]):
+    def assign_color_by_security_labels(hardware: Hardware, all_executables: Dict[str, Executor]):
         pass
 
 
