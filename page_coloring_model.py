@@ -94,6 +94,13 @@ class Hardware:
         def __str__(self):
             return str((str(self.cpu), self.page_color))
 
+        def __hash__(self):
+            return hash(str(self))
+
+        def __eq__(self, other):
+            return (isinstance(other, Hardware.SystemPageColor) and
+                    self.cpu == other.cpu and self.page_color == other.page_color)
+
     def __init__(self, cpu_cache_config: CPUCacheConfig, page_size: int=4096):
         """
         Args:
