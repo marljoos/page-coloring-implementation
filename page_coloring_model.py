@@ -423,7 +423,7 @@ class ColorAssigner:
     @staticmethod
     def assign_color_by_interference_domains(hardware: Hardware, all_memory_consumers: Dict[str, MemoryConsumer],
                                              interference_domains: List[Set[MemoryConsumer]]):
-        """Assigns colors by interference domains.
+        """Assign colors by interference domains.
 
         This function does not respect pre-assigned colors of memory consumers. All memory consumer colors
         must be undefined (None) at beginning of assignment.
