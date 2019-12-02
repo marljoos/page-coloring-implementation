@@ -145,6 +145,9 @@ class Hardware:
                                   for cpu in self.cpu_cache_config.get_cpu_cores()]
         return all_system_page_colors
 
+    def get_cpu_cores(self):
+        return self.cpu_cache_config.get_cpu_cores()
+
 
 class Cache:
     """Description of a CPU cache."""
