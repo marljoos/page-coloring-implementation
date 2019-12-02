@@ -380,7 +380,19 @@ def print_memory_consumer(all_memory_consumers: Dict[str, MemoryConsumer]) -> No
 
 
 class ColorAssigner:
-    """Responsible for assigning colors to MemoryConsumers."""
+    """Responsible for assigning colors to MemoryConsumers.
+
+    They're currently three four assignment methods:
+    1. naive: Just distribute system page colors to each memory consumer so that each CPU cores
+              are distributed equally to the memory consumers. It's equivalent when using the interference domains
+              method with an empty interference domains list.
+    2. with interference domains: Specify sets of memory consumers which may interfere which each other.
+    3. with security labels: Assign system page colors according to the security labels of the memory consumers
+                             so that no memory consumer can cache-interfere with higher-clearance memory consumers
+                             and no memory consumer can cache-interfere with memory consumers with different
+                             compartment.
+    4. with cache isolation domains: TODO
+    """
 
     class ColorExhaustion(Exception):
         def __init__(self):
@@ -482,18 +494,55 @@ class ColorAssigner:
             color_usage_counter_table[assignable_color] += 1
 
     @staticmethod
-    def assign_color_by_security_labels(hardware: Hardware, all_executables: Dict[str, Executor]):
-        pass
+    def get_assignment_by_security_labels(hardware: Hardware, all_executors: Dict[str, Executor]) \
+            -> Dict[MemoryConsumer, Hardware.SystemPageColor]:
+        return {}
 
+    @staticmethod
+    def assign_color_by_security_labels(hardware: Hardware, all_executors: Dict[str, Executor]):
+        assignment = ColorAssigner.get_assignment_by_security_labels(hardware, all_executors)
+        ColorAssigner._enforce_assignment(assignment)
+
+    @staticmethod
+    def get_assignment_by_cache_isolation_domains(
+            hardware: Hardware,
+            all_memory_consumers: Dict[str, MemoryConsumer],
+            cache_isolation_domains: List[Set[MemoryConsumer]],
+            executor_cpu_constraints: Dict[Executor, Set[Hardware.CPU]] = None,
+            cpu_access_constraints: Dict[Hardware.CPU, Executor] = None
+    ) \
+            -> Dict[MemoryConsumer, Hardware.SystemPageColor]:
+        return {}
+
+    @staticmethod
+    def assign_by_cache_isolation_domains(
+            hardware:                   Hardware,
+            all_memory_consumers:       Dict[str, MemoryConsumer],
+            cache_isolation_domains:    List[Set[MemoryConsumer]],
+            executor_cpu_constraints:   Dict[Executor, Set[Hardware.CPU]] = None,
+            cpu_access_constraints:     Dict[Hardware.CPU, Executor] = None
+    ):
+        """
+
+        Args:
+            hardware:
+            all_memory_consumers:
+            cache_isolation_domains:
+            executor_cpu_constraints:
+            cpu_access_constraints:
+
+        Returns:
+
+        """
+        assignment = ColorAssigner.get_assignment_by_cache_isolation_domains(
+            hardware, all_memory_consumers, cache_isolation_domains, executor_cpu_constraints, cpu_access_constraints
+        )
+        ColorAssigner._enforce_assignment(assignment)
 
     @staticmethod
     def _enforce_assignment(assignment: Dict[MemoryConsumer, Hardware.SystemPageColor]):
         for memory_consumer, color in assignment.items():
             memory_consumer.set_color(color)
-
-
-###############################################################################
-
 
 def main():
     # Main memory size in Gibibyte
