@@ -1,4 +1,8 @@
 # TODOs
+* Implement cache isolation domains method
+* Add System class to simplify ColorAssignment method interfaces
+    * Integrate print_memory_consumer method into this class
+* Add address space assignment method.
 * Split L1 instruction cache & L1 data cache
 * Take care of complex indexing in L3 cache.
 * Take care of reserved memory.
@@ -8,6 +12,8 @@
   die gleiche interference domain zuzuordnen.
 * Implement CPU isolation domains
 * Implement Subject->CPU constraints for color assignment
+* Testing / Unit tests
+* Add name to subject/executors/memory consumers
 
 ## DONE
 * must somehow model shared memory (channels)
