@@ -22,7 +22,7 @@ class Hardware:
         cpu_ctr = 0
 
         def __init__(self, name: str = None):
-            if name is None:
+            if name is None:  # if name is not specified, name is "CPU_$cpu_ctr"
                 name = str(Hardware.CPU.cpu_ctr)
                 Hardware.CPU.cpu_ctr += 1
             assert name not in Hardware.CPU.cpu_namespace, "CPU core names must be unique."
