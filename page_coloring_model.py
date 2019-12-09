@@ -39,8 +39,8 @@ class Hardware:
                      cache_cpu_mappings: List[Dict['Cache', 'CPU']]):
             """
             Args:
-                caches: List of list of caches, where the first elements designates the list of L1 caches,
-                the second elements, designates the list of L2 caches, etc.
+                caches: List of list of caches, where the first element designates the list of L1 caches,
+                the second element, designates the list of L2 caches, etc.
                 cpu_cores: List of CPU cores of the system.
                 cache_cpu_mappings: List of mappings (in form of a dictionary) from a cache to a CPU core.
                 The first element designates the mappings of the L1 caches, the second element the mappings of the L2
@@ -159,7 +159,7 @@ class Cache:
             associativity: Number of cache lines of a set in a cache.
             cacheline_capacity: Number of Bytes a cache line can store.
             flushed: True if cache is flushed on context/subject switch. This effectively enables the usage of
-                            colors of higher level caches.
+                colors of higher level caches.
             page_size: Page size in bytes.
         """
         self.flushed = flushed
@@ -297,7 +297,8 @@ class Kernel(MemoryConsumer, Executor):
 class Subject(MemoryConsumer, Executor):
     """A subject represents a running instance of a component on top of a SK.
 
-    It has a memory requirement (in Byte) and may have channels to other subjects."""
+    It has a memory requirement (in Byte) and may have channels to other subjects.
+    """
 
     def __init__(self, memsize):
         super().__init__(memsize)
@@ -320,7 +321,7 @@ class Subject(MemoryConsumer, Executor):
             self.outchannels[to_subject].append(channel)
 
     def get_channels(self):
-        """Returns all in and out channels of this s
+        """Returns all in and out channels of this subject.
 
         Returns:
             List[Channels]: List of all channels of subject.
@@ -381,7 +382,7 @@ def print_memory_consumer(all_memory_consumers: Dict[str, MemoryConsumer]) -> No
 class ColorAssigner:
     """Responsible for assigning colors to MemoryConsumers.
 
-    They're currently three four assignment methods:
+    They're currently four assignment methods:
     1. naive: Just distribute system page colors to each memory consumer so that each CPU cores
               are distributed equally to the memory consumers. It's equivalent when using the interference domains
               method with an empty interference domains list.
@@ -425,8 +426,8 @@ class ColorAssigner:
     @staticmethod
     def assign_by_naive(hardware: Hardware, all_memory_consumers: Dict[str, MemoryConsumer]):
         """
-        Distributes - if possible - system page colors to all memory consumers by iterating through all system page colors
-        and distributing colors from all CPU cores equally. Raises an exception if it's not possible.
+        Distributes - if possible - system page colors to all memory consumers by iterating through all system page
+        colors and distributing colors from all CPU cores equally. Raises an exception if it's not possible.
 
         Raises:
             ColorAssigner.ColorExhaustion: There are not enough colors to distribute.
