@@ -82,25 +82,34 @@ class Hardware:
 
     class SystemPageColor:
         """A system page color is a tuple of CPU and int whereas the first element designates a CPU core
-        and the second element designates a usable page color.
+        and the second element designates a CPU page color.
+
+        Note the difference (CPU_0, 3) is a possible SystemPageColor, whereas 3 is the CPU page color, which indexes
+        a page color within a CPU core.
 
         E. g. (CPU_0, 0), (CPU_1, 3), (CPU_3, 127) are valid system page colors on a system with three CPU cores
-        and 128 usable page colors."""
-        def __init__(self, cpu: 'Hardware.CPU', page_color: int):
+        and 128 CPU page colors."""
+        def __init__(self, cpu: 'Hardware.CPU', cpu_page_color: int):
             self.cpu = cpu
-            self.page_color = page_color
+            self.cpu_page_color = cpu_page_color
 
         def __str__(self):
-            return str((str(self.cpu), self.page_color))
+            return str((str(self.cpu), self.cpu_page_color))
 
         def __hash__(self):
             return hash(str(self))
 
         def __eq__(self, other):
             return (isinstance(other, Hardware.SystemPageColor) and
-                    self.cpu == other.cpu and self.page_color == other.page_color)
+                    self.cpu == other.cpu and self.cpu_page_color == other.cpu_page_color)
 
-    def __init__(self, cpu_cache_config: CPUCacheConfig, page_size: int=4096):
+        def get_cpu(self):
+            return self.cpu
+
+        def get_cpu_page_color(self):
+            return self.cpu_page_color
+
+    def __init__(self, cpu_cache_config: CPUCacheConfig, page_size: int = 4096):
         """
         Args:
             cpu_cache_config: Complex data structure which describes CPU cores, caches and their mappings to the
@@ -110,15 +119,16 @@ class Hardware:
         # TODO: Implement initialization
         self.cpu_cache_config = cpu_cache_config
 
-    def get_number_of_usable_colors(self):
+    def get_number_of_cpu_page_colors(self) -> int:
         """
-        Returns the number of page colors which can practically be used to separate execution contexts/subjects to
-        mitigate cache side-channels. Note that this number does not reflect maximum number of page colors
-        when only considering the biggest last-level cache.
+        Returns the number of CPU page colors of the system.
 
-        Returns:
-            int: Number of page colors which can practically be used to separate execution contexts/subjects.
+        So if the system has 4 CPU cores, an one CPU core has SystemPageColors from (CPU_X, 0) to (CPU_X, 127) the
+        system has 128 CPU page colors.
+
+        Note this is not the number of all usable system page colors of the system.
         """
+
         colors_of_one_cache = 0
         for caches_of_same_level in self.cpu_cache_config.get_caches():
             colors_of_one_cache = caches_of_same_level[0].get_colors()
@@ -128,7 +138,12 @@ class Hardware:
                 break
 
         assert colors_of_one_cache > 0
-        return colors_of_one_cache*len(self.cpu_cache_config.get_cpu_cores())
+        return colors_of_one_cache
+
+    def get_number_of_system_page_colors(self) -> int:
+        # number of system page colors is number of cpu page colors times the number of CPU cores
+        number_of_system_page_colors = self.get_number_of_cpu_page_colors() * len(self.get_cpu_cores())
+        return number_of_system_page_colors
 
     def get_all_system_page_colors(self):
         """Returns the list of all system page colors sorted by page color (int).
@@ -139,8 +154,8 @@ class Hardware:
                 (CPU_0,0), (CPU_1,0), (CPU_0, 1), (CPU_1, 1), ...
         """
         # (CPU_0,0), (CPU_1,0), (CPU_0, 1), (CPU_1, 1), ...
-        all_system_page_colors = [Hardware.SystemPageColor(cpu, color)
-                                  for color in range(self.get_number_of_usable_colors())
+        all_system_page_colors = [Hardware.SystemPageColor(cpu, cpu_page_color)
+                                  for cpu_page_color in range(self.get_number_of_cpu_page_colors())
                                   for cpu in self.cpu_cache_config.get_cpu_cores()]
         return all_system_page_colors
 
