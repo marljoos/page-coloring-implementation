@@ -36,7 +36,10 @@ class Hardware:
         def __init__(self,
                      caches: List[List['Cache']],
                      cpu_cores: List['Hardware.CPU'],
-                     cache_cpu_mappings: List[Dict['Cache', 'Hardware.CPU']]):
+                     cache_cpu_mappings: List[Dict['Cache', 'Hardware.CPU']],
+                     complex_indexing: bool = False  # TODO: Currently not supported, maybe assigning indexing function
+                                                     # instead of boolean
+        ):
             """
             Args:
                 caches: List of list of caches, where the first element designates the list of L1 caches,
