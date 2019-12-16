@@ -283,30 +283,28 @@ class MemoryConsumer:
         return self.color
 
     def set_address_space(self, address_space: List[range]):
+        def __address_space_size(address_space: List[range]) -> int:
+            size = 0
+            for mem_range in address_space:
+                size += len(mem_range)
+
+            return size
+
+        def __address_space_not_overlapping(address_space: List[range]) -> bool:
+            # union of all addresses of address space
+            union = set().union(*address_space)
+            # number of addresses of each memory range in address space
+            n = sum(len(mem_range) for mem_range in address_space)
+
+            return n == len(union)
+
         assert len(address_space) > 0, "There must be at least one range of addresses specified."
-        assert MemoryConsumer.__address_space_size(address_space) == self.memsize,\
+        assert __address_space_size(address_space) == self.memsize,\
             "Size of specified address space must comply to the memory requirement/size of the MemoryConsumer."
         assert MemoryConsumer.__address_space_not_overlapping(address_space),\
             "Address ranges must not be overlapping."
 
         self.address_space = address_space
-
-    @staticmethod
-    def __address_space_size(address_space: List[range]) -> int:
-        size = 0
-        for mem_range in address_space:
-            size += len(mem_range)
-
-        return size
-
-    @staticmethod
-    def __address_space_not_overlapping(address_space: List[range]) -> bool:
-        # union of all addresses of address space
-        union = set().union(*address_space)
-        # number of addresses of each memory range in address space
-        n = sum(len(mem_range) for mem_range in address_space)
-
-        return n == len(union)
 
     def get_address_space(self):
         return self.address_space
