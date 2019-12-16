@@ -169,7 +169,12 @@ class Hardware:
 class Cache:
     """Description of a CPU cache."""
 
-    def __init__(self, total_capacity: int, associativity: int, cacheline_capacity: int, flushed: bool = False,
+    def __init__(self,
+                 total_capacity: int,
+                 associativity: int,
+                 cacheline_capacity: int,
+                 shared: bool = False,  # TODO: documentation,
+                 flushed: bool = False,
                  page_size: int = 4096):
         """
         Args:
