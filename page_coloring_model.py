@@ -373,6 +373,7 @@ class Subject(MemoryConsumer, Executor):
 
         Returns:
             List[Channel]: All out channels to given subject and all in channels from given subject.
+        Raises: TODO: Raises exception if there is no in or out channel from/to subject.
         """
         return self.inchannels[subject] + self.outchannels[subject]
 
