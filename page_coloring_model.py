@@ -277,12 +277,16 @@ class MemoryConsumer:
         self.memsize = memsize
         self.color = None
         self.executors: List[Executor] = []
+        self.colors = []
 
-    def set_color(self, color: Hardware.SystemPageColor):
-        self.color = color
+    def reset_colors(self):
+        self.colors = []
 
-    def get_color(self):
-        return self.color
+    def add_color(self, color: Hardware.SystemPageColor):
+        self.colors.append(color)
+
+    def get_colors(self):
+        return self.colors
 
     def add_executor(self, executor: Executor):
         self.executors.append(executor)
