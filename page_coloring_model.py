@@ -338,6 +338,8 @@ class Subject(MemoryConsumer, Executor):
         self.inchannels: Dict[Subject, List[Channel]] = {}
         self.outchannels: Dict[Subject, List[Channel]] = {}
 
+        self.add_executor(self)
+
     def add_inchannel(self, channel: 'Channel'):
         from_subject = channel.get_source()
         if from_subject not in self.inchannels:
