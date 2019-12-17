@@ -450,15 +450,15 @@ class ColorAssigner:
     @staticmethod
     def reset_colors(all_memory_consumers: Dict[str, MemoryConsumer]):
         for memory_consumer in all_memory_consumers.values():
-            memory_consumer.set_color(None)
+            memory_consumer.reset_colors()
 
     @staticmethod
     def get_assignment_by_naive(hardware: Hardware, all_memory_consumers: Dict[str, MemoryConsumer]) -> \
-            Dict[MemoryConsumer, Hardware.SystemPageColor]:
+            Dict[Hardware.SystemPageColor, Set[MemoryConsumer]]:
 
-        assignment = {}
+        assignment = {system_page_color: set() for system_page_color in hardware.get_all_system_page_colors()}
 
-        num_assignable_colors = hardware.get_number_of_usable_colors()
+        num_assignable_colors = hardware.get_number_of_system_page_colors()
         num_required_colors = len(all_memory_consumers)
         all_system_page_colors = hardware.get_all_system_page_colors()
 
@@ -466,7 +466,7 @@ class ColorAssigner:
             raise ColorAssigner.ColorExhaustion()
         else:
             for memory_consumer, color in zip(all_memory_consumers.values(), all_system_page_colors):
-                assignment[memory_consumer] = color
+                assignment[color].add(memory_consumer)
 
         return assignment
 
@@ -510,7 +510,9 @@ class ColorAssigner:
         #              return EXCEPTION (color exhaustion)
         #       2. assign rest of colors incrementally to rest of all_memory_consumers and
         #          assure that there is no color exhaustion
-        assert all((memory_consumer.get_color() is None) for memory_consumer in all_memory_consumers.values()),\
+
+        # get_colors is None or Empty for all memory consumers?
+        assert all((not memory_consumer.get_colors()) for memory_consumer in all_memory_consumers.values()),\
             "The colors of all memory consumers must be undefined."
 
         def get_next_assignable_color(table: Dict[Hardware.SystemPageColor, int]):
@@ -526,10 +528,11 @@ class ColorAssigner:
         for interference_domain in interference_domains:
             assignable_color = get_next_assignable_color(color_usage_counter_table)
             for memory_consumer in interference_domain:
-                if memory_consumer.get_color() is not None:
-                    color_usage_counter_table[memory_consumer.get_color()] -= 1
+                #if memory_consumer.get_color() is not None:
+                if len(memory_consumer.get_colors()) == 1:
+                    color_usage_counter_table[memory_consumer.get_colors()[0]] -= 1
 
-                memory_consumer.set_color(assignable_color)
+                memory_consumer.add_color(assignable_color)
                 color_usage_counter_table[assignable_color] += 1
 
                 all_memory_consumers_values.remove(memory_consumer)
@@ -537,12 +540,12 @@ class ColorAssigner:
         # assign colors to rest of all_memory_consumers_values
         for memory_consumer in all_memory_consumers_values:
             assignable_color = get_next_assignable_color(color_usage_counter_table)
-            memory_consumer.set_color(assignable_color)
+            memory_consumer.add_color(assignable_color)
             color_usage_counter_table[assignable_color] += 1
 
     @staticmethod
     def get_assignment_by_security_labels(hardware: Hardware, all_executors: Dict[str, Executor]) \
-            -> Dict[MemoryConsumer, Hardware.SystemPageColor]:
+            -> Dict[MemoryConsumer, Set[Hardware.SystemPageColor]]:
         return {}
 
     @staticmethod
@@ -587,7 +590,8 @@ class ColorAssigner:
         ColorAssigner._enforce_assignment(assignment)
 
     @staticmethod
-    def _enforce_assignment(assignment: Dict[MemoryConsumer, Hardware.SystemPageColor]):
-        for memory_consumer, color in assignment.items():
-            memory_consumer.set_color(color)
-
+    def _enforce_assignment(assignment: Dict[Hardware.SystemPageColor, Set[MemoryConsumer]]):
+        for color, memory_consumers in assignment.items():
+            for memory_consumer in memory_consumers:
+                # logging.debug("Add color: " + str(color))
+                memory_consumer.add_color(color)
