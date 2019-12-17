@@ -261,6 +261,7 @@ class MemoryConsumer:
     A MemoryConsumer consumes certain memory of size $memsize > 0
     and may get assigned an address space of size $memsize and a color
     for this address space.
+    A MemoryConsumer may also have a list of Executors which are accessing (read/write/execute) the memory region.
     """
 
     def __init__(self, memsize: int, page_size: int = 4096):
@@ -275,12 +276,19 @@ class MemoryConsumer:
         self.address_space = None
         self.memsize = memsize
         self.color = None
+        self.executors: List[Executor] = []
 
     def set_color(self, color: Hardware.SystemPageColor):
         self.color = color
 
     def get_color(self):
         return self.color
+
+    def add_executor(self, executor: Executor):
+        self.executors.append(executor)
+
+    def get_executors(self):
+        return self.executors
 
     def set_address_space(self, address_space: List[range]):
         def __address_space_size(address_space: List[range]) -> int:
@@ -312,7 +320,10 @@ class MemoryConsumer:
 
 # We assume that Kernel memory pages can also be colored easily. #ASSMS-KERNEL-PAGE-COLORING
 class Kernel(MemoryConsumer, Executor):
-    pass
+    def __init__(self, memsize):
+        super().__init__(memsize)
+
+        self.add_executor(self)
 
 
 class Subject(MemoryConsumer, Executor):
@@ -372,6 +383,9 @@ class Channel(MemoryConsumer):
 
         source.add_outchannel(self)
         target.add_inchannel(self)
+
+        self.add_executor(source)
+        self.add_executor(target)
 
     def get_source(self):
         return self.source
