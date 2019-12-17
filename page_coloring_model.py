@@ -482,6 +482,7 @@ class ColorAssigner:
         assignment = ColorAssigner.get_assignment_by_naive(hardware, all_memory_consumers)
         ColorAssigner._enforce_assignment(assignment)
 
+    # TODO: review / deprecated?
     @staticmethod
     def assign_color_by_interference_domains(hardware: Hardware, all_memory_consumers: Dict[str, MemoryConsumer],
                                              interference_domains: List[Set[MemoryConsumer]]):
@@ -543,11 +544,13 @@ class ColorAssigner:
             memory_consumer.add_color(assignable_color)
             color_usage_counter_table[assignable_color] += 1
 
+    # TODO: review / deprecated?
     @staticmethod
     def get_assignment_by_security_labels(hardware: Hardware, all_executors: Dict[str, Executor]) \
             -> Dict[MemoryConsumer, Set[Hardware.SystemPageColor]]:
         return {}
 
+    # TODO: review / deprecated?
     @staticmethod
     def assign_color_by_security_labels(hardware: Hardware, all_executors: Dict[str, Executor]):
         assignment = ColorAssigner.get_assignment_by_security_labels(hardware, all_executors)
