@@ -398,18 +398,23 @@ class Channel(MemoryConsumer):
 
 def print_memory_consumer(all_memory_consumers: Dict[str, MemoryConsumer]) -> None:
     def print_bar():
-        print("=" * 74)
+        print("=" * 85)
 
-    fmt1 = '{0: <45}'  # format string with width 20
+    fmt1 = '{0: <45}'
     fmt2 = '{0: <10}'
 
     print_bar()
-    print(fmt1.format('Memory Consumer') + ' : ' + fmt2.format('Color') + ' : ' + fmt2.format('Address Space'))
+    print(fmt1.format('Memory Consumer')
+          + ' : ' + fmt2.format('Color(s)')
+    #     + ' : ' + fmt2.format('Address Space')
+          )
     print_bar()
     for name, memory_consumer in all_memory_consumers.items():
-        print(fmt1.format(name) + " : "
-              + fmt2.format(str(memory_consumer.get_color())) + ' : '
-              + fmt1.format(str(memory_consumer.get_address_space())))
+        colors = ''.join(str(color) for color in memory_consumer.get_colors())
+        print(fmt1.format(name)
+              + ' : ' + fmt2.format(colors)
+        #     + ' : ' + fmt1.format(str(memory_consumer.get_address_space()))
+              )
     print_bar()
     # TODO: Print number of used and unassigned colors.
 
