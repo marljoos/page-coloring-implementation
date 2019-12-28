@@ -426,6 +426,125 @@ def print_memory_consumer(all_memory_consumers: Dict[str, MemoryConsumer]) -> No
     # TODO: Print number of used and unassigned colors.
 
 
+# TODO: move to System class
+def print_channels():
+    pass
+
+
+# TODO: move to System class
+def print_system_page_colors_address_spaces(system_page_colors):
+    # params:
+    # - list of colors, ordered;
+    #   - need specification of ordering of colors,
+    #   - is (CPU_1, 0) color 2 (after (CPU_0, 0) ) or color 9 (color after (CPU_0, $LAST_CPU_PAGE_COLOR) )
+    # - MEMSIZE / MEMRANGES
+    # - complex indexing / indexing function
+    def print_bar():
+        print("=" * 85)
+
+    # address_space: List[range]
+
+    def assign_address_spaces(system_page_colors):
+        """
+        Example for 32 bit addresses:
+
+        1098765432109 87654 32109876 543210
+                      |   |  |     | |    |
+                      |   |  |     | +--->+--> Depending on cache line size (here assuming 64 Bytes):
+                      |   |  |     |           - Bit 0 to Bit 5: Bytes within cache line
+                      |   |  |     |
+                      |   |  +-----|---------> Depending on page size (here assuming 4096 bytes (taking 12 bits):
+                      |   |        |           - From Bit 12 to MSB: Real page frame index which can be used for
+                      |   |        |             assigning page frames
+                      |   |        |             - These bits without System Page Color index bits:
+                      |   |        |               -> Logical page frame index
+                      |   |        |
+                      +------------+---------> Depending on the number of sets of the last level cache
+                      |   |                       (here assuming 8192 sets of the L3 cache -> 13 Bits):
+                      |   |                    - Bit 6 to Bit 18: Set index (enumerates the sets of the L3 cache)
+                      |   |
+                      +---+------------------> Depending on the size of the Set index and the number of
+                                                System Page Colors
+                                                  (here assuming a Set index width of 13 Bits, and 32 (5 Bits) as number
+                                                   of all System Page Colors, e. g. a 4 CPU core system with 8 CPU Page
+                                                   Colors from (CPU_0, 0) to (CPU_3, 7) )
+                                               - Bit 14 to Bit 18: System Page Color index
+                                                      (used to map System Page Colors to assignable address ranges)
+                                                 - SystemPageColors'BitWidth most significant bits of Set index
+
+        Example mapping of System Page Color to address ranges (assuming (CPU_0, 0) has color index 0) using a bitmask:
+                      1098765432109 87654 32109876 543210
+        (CPU_0, 0) -> XXXXXXXXXXXXX 00000 XX------ ------
+           ...
+        (CPU_3, 7) -> XXXXXXXXXXXXX 11111 XX------ ------
+
+            All X's comprises the logical page frame index. So the first page frame which can be used by (CPU_0, 0) is
+            1098765432109 87654 32109876 543210
+            0000000000000 00000 00------ ------
+            and the last page frame which can be used by (CPU_0, 0) is
+            1098765432109 87654 32109876 543210
+            1111111111111 00000 11------ ------
+
+        Args:
+            system_page_colors:
+
+        Returns:
+
+        """
+        mapping = {system_page_color: set() for system_page_color in system_page_colors}
+
+        # TODO: no hardcoded stuff
+        import math
+        all_bits = 32  # 32-bit address space
+        cache_line_size = 64
+        num_llc_sets = 8192
+        num_system_page_colors = len(system_page_colors)
+        page_size = 4096
+
+        cache_line_bits = int(math.log2(cache_line_size))
+        set_index_bits = int(math.log2(num_llc_sets))
+        color_index_bits = int(math.log2(num_system_page_colors))
+
+        msb_color_index = cache_line_bits + set_index_bits
+        lsb_color_index = msb_color_index - color_index_bits
+        lsb_page_frame_index = int(math.log2(page_size))
+
+        bitmask_raw = "X"*all_bits
+        # mark all bits within page frame
+        bitmask_raw = "-"*lsb_page_frame_index + bitmask_raw[lsb_page_frame_index:]
+        # set color index
+        bitmask_raw = bitmask_raw[0:lsb_color_index] + "00000" + bitmask_raw[msb_color_index:]
+
+        print("bitmask_raw=" + bitmask_raw)
+        print("bitmask_new=" + bitmask_raw[0:lsb_color_index] + format(5, '05b')[::-1] + bitmask_raw[msb_color_index:])
+
+        color_cnt = 0
+        for system_page_color, bitmask in mapping.items():
+            b = bitmask_raw[0:lsb_color_index] + format(color_cnt, '05b')[::-1] + bitmask_raw[msb_color_index:]
+            mapping[system_page_color] = b[::-1]
+            color_cnt += 1
+
+        return mapping
+
+    color_addrspace_mapping = assign_address_spaces(system_page_colors)
+
+    fmt1 = '{0: <17}'
+    fmt2 = '{0: <10}'
+
+    print_bar()
+    print(fmt1.format('System Page Color')
+          + ' : ' + fmt2.format('Address space(s)')
+          )
+    print_bar()
+
+    for system_page_color, address_spaces in color_addrspace_mapping.items():
+        print(fmt1.format(str(system_page_color))
+              + ' : ' + fmt2.format(str(address_spaces))
+              )
+
+    print_bar()
+
+
 class ColorAssigner:
     """Responsible for assigning colors to MemoryConsumers.
 
