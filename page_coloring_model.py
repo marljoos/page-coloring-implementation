@@ -681,10 +681,121 @@ class ColorAssigner:
             all_memory_consumers: Dict[str, MemoryConsumer],
             cache_isolation_domains: List[Set[MemoryConsumer]],
             executor_cpu_constraints: Dict[Executor, Set[Hardware.CPU]] = None,
-            cpu_access_constraints: Dict[Hardware.CPU, Executor] = None
-    ) \
-            -> Dict[MemoryConsumer, Hardware.SystemPageColor]:
-        return {}
+            cpu_access_constraints: Dict[Hardware.CPU, Set[Executor]] = None
+    ) -> Dict[Hardware.SystemPageColor, Set[MemoryConsumer]]:
+        # Check if all memory consumers are only assigned to one cache_isolation_domain
+        # and initialize count value to zero
+        #count_membership_of_mc: Dict[MemoryConsumer, int] = dict.fromkeys(all_memory_consumers.values(), 0)
+        count_membership_of_mc = {memory_consumer: 0 for memory_consumer in all_memory_consumers.values()}
+        for isolation_domain in cache_isolation_domains:
+            for memory_consumer in isolation_domain:
+                if memory_consumer in count_membership_of_mc.keys():
+                    count_membership_of_mc[memory_consumer] += 1
+
+        # logging.debug("count_membersip_of_mc" + str(count_membership_of_mc.items()))
+        assert 0 not in count_membership_of_mc.values(), "All memory consumers of the system must be assigned at least " \
+                                                         "to one cache isolation domain. #ASSMS-CACHE-ISOLATION-0"
+        assert all(count == 1 for count in count_membership_of_mc.values()), "A memory consumer can only be member of" \
+                                                                             " only one cache isolation domain. " \
+                                                                             "#ASSMS-CACHE-ISOLATION-1"
+        assert cpu_access_constraints is None, "CPU-Access-Constraints are currently unimplemented/not needed. " \
+                                               "#ASSMS-CACHE-ISOLATION-7"
+
+        # Algorithm idea:
+        # Iterate through partitions and assign a pool of reservable colors to each cache isolation domain.
+        #   We assign a pool of colors and not one color, because there can be several executors within the same
+        #   cache isolation domain but which are not running on the same CPU core.
+        #   So there is no single reservable color for {subject_X, subject_Y} when they're are running on different
+        #   CPU cores.
+        # After each iteration steps, the cache isolation domain members add all possible reservable colors to their own
+        # colors.
+        #   Possible means: System Page Colors' CPU part is CPU the memory consumer is accessed by (read/write/execute).
+        # We repeat the iteration through cache isolation domains until there is no color to assign left.
+
+        def assign_colors_to_cache_isolation_domain(cache_isolation_domain,
+                                                    assignment: Dict[Hardware.SystemPageColor, Set[MemoryConsumer]]):
+            """Assign colors to provided cache isolation domain"""
+            def get_next_assignable_colors(
+                    memory_consumer: MemoryConsumer,
+                    assignment: Dict[Hardware.SystemPageColor, Set[MemoryConsumer]])\
+                    -> List[Hardware.SystemPageColor]:
+                """Returns the next assignable colors of a memory consumer without reserving them."""
+                """
+                Ideas:
+                    - If MemoryConsumer is only on running one CPU cores (e. g. CPU_X), then just get the next free
+                      (CPU_X, Y) page color.
+                    - If MemoryConsumer is running on several CPU cores (e. g. CPU_X and CPU_Y), then get next free
+                      colors (CPU_X, A) and (CPU_Y, B), where A == B.
+                      Background:
+                        Assuming MemoryConsumer is running on two CPU cores on one memory page. Then we must assume
+                        that the MemoryConsumer can run with both CPU core on this memory page and occupying
+                        two page colors for the same memory page.
+                    - If a MemoryConsumer is a Channel then we could also need two page colors, if source and target
+                      subjects are running on different CPU cores; if not, we only need one page color.
+                """
+
+                # get the CPU core(s) of the memory consumer and get next assignable SystemPageColors
+                # with matching CPU core(s), which have all the same page_color, e. g.
+                # (CPU_0, x), (CPU_1, y) when (CPU cores is CPU_0 and CPU_1) and where x=y.
+                executors = memory_consumer.get_executors()
+                cpus = []
+                for executor in executors:
+                    cpus.extend(executor_cpu_constraints[executor]) # TODO: bad style
+
+                for cpu_page_color in range(hardware.get_number_of_cpu_page_colors()):
+                    if all(len(assignment[Hardware.SystemPageColor(cpu, cpu_page_color)]) == 0 for cpu in cpus):
+                        return [Hardware.SystemPageColor(cpu, cpu_page_color) for cpu in cpus]
+
+                raise ColorAssigner.ColorExhaustion()
+
+            def assign_colors(
+                    cache_isolation_domain,
+                    cache_isolation_domain_colors: List[Hardware.SystemPageColor],
+                    assignment: Dict[Hardware.SystemPageColor, Set[MemoryConsumer]]
+                    # color_table: Dict[Hardware.SystemPageColor, int]
+            ):
+                """Assign SystemPageColors to the MemoryConsumers in the cache isolation domain - if possible  -
+                and mark the system page color as used in the color table."""
+                for color in cache_isolation_domain_colors:
+                    for memory_consumer in cache_isolation_domain:
+                        executors = memory_consumer.get_executors() # TODO: bad style
+                        memory_consumer_cpus = []
+                        for executor in executors:
+                            memory_consumer_cpus.extend(executor_cpu_constraints[executor])
+                        # memory_consumer_cpus = [executor_cpu_constraints[executor] for executor in
+                        #                        memory_consumer.get_executors()]
+                        if color.get_cpu() in memory_consumer_cpus:
+                            assignment[color].add(memory_consumer)
+                            # memory_consumer.add_color(color)
+                            # color_table[color] += 1
+
+            cache_isolation_domain_colors: List[Hardware.SystemPageColor] = []
+
+            for cache_isolation_member in cache_isolation_domain:
+                colors = get_next_assignable_colors(cache_isolation_member, assignment)
+                cache_isolation_domain_colors.extend(colors)
+
+            assign_colors(cache_isolation_domain, cache_isolation_domain_colors, assignment)
+
+            # colors assigned implies len(cache_isolation_domain_colors) > 0
+            # logging.debug("cache_isolation_domain_colors:" + str(cache_isolation_domain_colors))
+            return len(cache_isolation_domain_colors) > 0
+
+        assignment = {system_page_color: set() for system_page_color in hardware.get_all_system_page_colors()}
+        color_to_assign_available = True
+        # counts how often a SystemPageColor is used
+        # color_table = dict.fromkeys(hardware.get_all_system_page_colors(), 0)
+
+        # while color_to_assign_available:
+        #     color_to_assign_available = False
+        #     for ci_domain in cache_isolation_domains:
+        #         color_to_assign_available |= assign_colors_to_cache_isolation_domain(ci_domain, assignment)
+
+        # only one iteration, TODO: more iteration until no color to assign left
+        for ci_domain in cache_isolation_domains:
+            color_to_assign_available |= assign_colors_to_cache_isolation_domain(ci_domain, assignment)
+
+        return assignment
 
     @staticmethod
     def assign_by_cache_isolation_domains(
@@ -692,19 +803,69 @@ class ColorAssigner:
             all_memory_consumers:       Dict[str, MemoryConsumer],
             cache_isolation_domains:    List[Set[MemoryConsumer]],
             executor_cpu_constraints:   Dict[Executor, Set[Hardware.CPU]] = None,
-            cpu_access_constraints:     Dict[Hardware.CPU, Executor] = None
+            cpu_access_constraints:     Dict[Hardware.CPU, Set[Executor]] = None
     ):
-        """
+        """Assign colors by cache isolation domains method.
+
+        A cache isolation domain contains a set of memory consumers and separates them (in the sense of cache
+        non-interference) from other memory consumers of the system. That means that memory consumers of the same
+        cache isolation domain reserve a set of colors which can be used by them and cannot be used by memory consumers
+        which are not member of the same cache isolation domain.
+
+        The set of colors assigned to an Executor can be further constrained by Executor-CPU-constraints.
+        Executor-CPU-constraints constraints the set of reservable colors of an Executors to the set of colors of
+        certain specified CPUs.
+        E. g.: On a 4-core systems, a subject X can be constrained to only reserve colors of
+        the kind (CPU_0, $num_colors), (CPU_3, $num_colors), which implicitly disallows all colors of the classes
+        (CPU_1, $num_colors) and (CPU_2, $num_colors), such as (CPU_1, 0), (CPU_1, 1), (CPU_2, 0), (CPU_2, 1), ...
+        An Executor-CPU-constraint does not mean that an executor gets a CPU core exclusively. Thus other Executors may
+        also reserve colors which are using the same CPU core.
+        Executor-CPU-constraints can especially be used for finding valid colors assignments of existing scheduling
+        plans which have already assigned CPU cores to executors.
+        The current implementation requires that all Executors of the system are assigned to at least on CPU core.
+        #ASSMS-CACHE-ISOLATION-6
+
+        CPU-Access-Constraints are currently unimplemented/not needed.
+        #Besides Executor-CPU-constraints the assignment of colors can also be further constrained by
+        #CPU-Access-Constraints. A CPU-Access-Constraint specifies a set of Executors which exclusively own a CPU core
+        #and thus only the specified Executors may reserve a System Page Color of the CPU.
+        #E. g.: if "CPU_0 -> {subject_X, subject_Y}" is specified as one CPU-Access-Constraint, then only subject_X and
+        #subject_Y (and no other Executors) are allowed to reserve System Page Colors of the form
+        #(CPU_0, 0), (CPU_0, 1), ... . Other CPU-Access-Constraints may additionally expand the space of reservable
+        #System Page Colors of subject_X and/or subject_Y independently (e. g. "CPU_1" -> {subject_X},
+        #"CPU_2" -> {subject_Y, subject_Z}).
+        #CPU-Access-Constraints can especially be used to enforce stricter isolation between Executors to prevent
+        #further shared microarchitectural state besides caches.
+
+        Assumptions and preconditions:
+            - All memory consumers of the system must be assigned at least to one cache isolation domain.
+              #ASSMS-CACHE-ISOLATION-0
+            - A memory consumer can only be member of one cache isolation domain. #ASSMS-CACHE-ISOLATION-1
+            # For simplicity commented out for now:
+            #- If the cache isolation domain of a memory consumer is not explicitly specified by
+            #  cache_isolation_domains,
+            #  it is implicitly assumed that the memory consumer gets its own exclusive cache isolation domain.
+            #  #ASSMS-CACHE-ISOLATION-2
+            - The specification of the constraints could have inconsistencies such as "subject_X -> CPU_0" as an
+              Executor-CPU-Constraint and "CPU_0 -> {subject_A, subject_B}" as a CPU-Access-Constraint.
+              There must be no inconsistencies between Executor-CPU-Constraints and CPU-Access-Constraints.
+              #ASSMS-CACHE-ISOLATION-3
+            - An Executor contained in any constraint must be an executor of the hardware system provided.
+              #ASSMS-CACHE-ISOLATION-4
+            - A CPU core contained in any constraint must be a CPU core of the hardware system provided.
+              #ASSMS-CACHE-ISOLATION-5
+            - The current implementation requires that all Executors of the system are assigned to at least on CPU core.
+              #ASSMS-CACHE-ISOLATION-6
+            - CPU-Access-Constraints are currently unimplemented/not needed. #ASSMS-CACHE-ISOLATION-7
 
         Args:
-            hardware:
-            all_memory_consumers:
-            cache_isolation_domains:
-            executor_cpu_constraints:
-            cpu_access_constraints:
-
-        Returns:
-
+            hardware: Hardware system.
+            all_memory_consumers: All memory consumers of the hardware system.
+            cache_isolation_domains: Cache isolation domains for which a valid page coloring is requested.
+            executor_cpu_constraints: Executor-CPU-Constraints which must enforced on top of the cache isolation
+                domains. See function documentation for details.
+            cpu_access_constraints: (Currently not implemented/not needed) CPU-Access-Constraints which must enforced on
+                top of the cache isolation domains. See function documentation for details.
         """
         assignment = ColorAssigner.get_assignment_by_cache_isolation_domains(
             hardware, all_memory_consumers, cache_isolation_domains, executor_cpu_constraints, cpu_access_constraints
