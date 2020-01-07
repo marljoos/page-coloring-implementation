@@ -313,7 +313,7 @@ class MemoryConsumer:
         assert len(address_space) > 0, "There must be at least one range of addresses specified."
         assert __address_space_size(address_space) == self.memsize,\
             "Size of specified address space must comply to the memory requirement/size of the MemoryConsumer."
-        assert MemoryConsumer.__address_space_not_overlapping(address_space),\
+        assert __address_space_not_overlapping(address_space),\
             "Address ranges must not be overlapping."
 
         self.address_space = address_space
