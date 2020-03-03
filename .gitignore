@@ -1,0 +1,7 @@
+__pycache__
+venv
+*.c
+*.bak
+asp_programs/archive
+archive/
+build/
