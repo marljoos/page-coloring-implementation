@@ -13,10 +13,11 @@
 %     - R3: Aus R1 und R2 wird das zweistellige Prädikat
 %           mc_cpu(X, Y) : (MemoryConsumer, CPUS) -> Bool abgeleitet, für das gilt:
 %           - R3.1: Executor-CPU entspricht der MemoryConsumer-CPU: ex_cpu(X, Y) => mc_cpu(X, Y)
-%           - R3.2: Gegeben Channel channel(X, Y), wobei X einer CPU X_CPU zugeordnet wurde:
-%                   mc_cpu(X, X_CPU), dann wird dem MemoryConsumer des Channels
-%                   memory_consumer(c(X, Y)) ebenfalls die CPU zugeordnet:
-%                   mc_cpu(c(X, Y), X_CPU) .
+%           - R3.2: Zuordnung der CPUs des Lesers (TO) und des Schreibers (FROM) zum MemoryConsumer eines Channels.
+%                   (Gegeben Channel channel(X, Y), wobei X einer CPU X_CPU und Y einer CPU Y_CPU zugeordnet wurde:
+%                   mc_cpu(X, X_CPU) und mc_cpu(X, Y_CPU), dann wird dem MemoryConsumer des Channels
+%                   memory_consumer(c(X, Y)) ebenfalls die CPUs zugeordnet:
+%                   mc_cpu(c(X, Y), X_CPU) und mc_cpu(c(X, Y), Y_CPU).
 %           - R3.3: Jedem MemoryConsumer X wird ein oder mehrere CPUs ∈ 𝒫 ⁺(CPUS) zugewiesen.
 %           - R3.4: Jeder CPU muss mindestens ein MemoryConsumer zugeordnet worden sein.
 %  4. Eine endliche Menge von CacheColors pro Level (wir gehen hier von 3 Level aus).
@@ -118,11 +119,13 @@ memory_consumer(c(FROM,TO)) :- channel(FROM, TO), executor(FROM), executor(TO).
 %           - R3.1: Executor-CPU entspricht der MemoryConsumer-CPU: ex_cpu(X, Y) => mc_cpu(X, Y)
 mc_cpu(MC, CPU) :- ex_cpu(MC, CPU).
 
-%           - R3.2: Gegeben Channel channel(X, Y), wobei X einer CPU X_CPU zugeordnet wurde:
-%                   mc_cpu(X, X_CPU), dann wird dem MemoryConsumer des Channels
-%                   memory_consumer(c(X, Y)) ebenfalls die CPU zugeordnet:
-%                   mc_cpu(c(X, Y), X_CPU) .
+%           - R3.2: Zuordnung der CPUs des Lesers (TO) und des Schreibers (FROM) zum MemoryConsumer eines Channels.
+%                   (Gegeben Channel channel(X, Y), wobei X einer CPU X_CPU und Y einer CPU Y_CPU zugeordnet wurde:
+%                   mc_cpu(X, X_CPU) und mc_cpu(X, Y_CPU), dann wird dem MemoryConsumer des Channels
+%                   memory_consumer(c(X, Y)) ebenfalls die CPUs zugeordnet:
+%                   mc_cpu(c(X, Y), X_CPU) und mc_cpu(c(X, Y), Y_CPU).
 mc_cpu(c(X,Y), CPU) :- channel(X,Y), mc_cpu(X, CPU).
+mc_cpu(c(X,Y), CPU) :- channel(X,Y), mc_cpu(Y, CPU).
 
 %           - R3.3: Jedem MemoryConsumer X wird ein oder mehrere CPUs ∈ 𝒫 ⁺(CPUS) zugewiesen.
 % D. h. es kann nicht der Fall sein, dass es ein MemoryConsumer X gibt, und X keine CPU
