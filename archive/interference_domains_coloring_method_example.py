@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 from page_coloring_model import *
+from itertools import cycle
 import logging
 
 
@@ -51,7 +52,8 @@ def main():
 
     hardware = Hardware(cpu_cache_config=cpu_cache_config, page_size=PAGE_SIZE)
 
-    logging.info("Number of usable colors: " + str(hardware.get_number_of_usable_colors()))
+    logging.info("Number of usable colors per CPU (CPU page color): " + str(hardware.get_number_of_cpu_page_colors()))
+    logging.info("Number of all system page colors: " + str(hardware.get_number_of_system_page_colors()))
 
     # DEBUG: Print all system page colors.
     logging.info("System page colors:")
@@ -114,7 +116,7 @@ def main():
         'Untrusted Linux Public -> Untrusted App':
             Channel(2 * PAGE_SIZE, subjects['Untrusted Linux Public'], subjects['Untrusted App']),
         'Untrusted Linux Public <- Untrusted App':
-            Channel(2 * PAGE_SIZE, subjects['Untrusted Linux Public'], subjects['Untrusted App']),
+            Channel(2 * PAGE_SIZE, subjects['Untrusted App'], subjects['Untrusted Linux Public'])
     }
 
     all_memory_consumers = {'Kernel': kernel, **subjects, **channels}
