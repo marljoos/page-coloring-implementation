@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 from page_coloring_model import *
+from page_coloring_model_pretty_printer import PageColoringModelPrettyPrinter
+from asp_color_assigner import ASPColorAssigner
 
 import itertools
 import logging
@@ -14,6 +15,7 @@ def main():
 
     # Size of a memory address in bits
     ADDRESS_BUS_WIDTH = 64
+    logging.info('Address bus width: ' + str(ADDRESS_BUS_WIDTH))
 
     # Page size in Byte
     PAGE_SIZE = 4096
@@ -22,7 +24,7 @@ def main():
     # Number of CPU cores
     NUM_CPUS = 4
     logging.info('Number of CPU cores: ' + str(NUM_CPUS))
-    PrettyPrinter.print_bar()
+    PageColoringModelPrettyPrinter.print_bar()
 
     cpu_cores = [Hardware.CPU() for _ in range(0, NUM_CPUS)]
     # TODO: Maybe implement "CacheList" type to ensure one level of caches only has structurally equal caches.
@@ -47,17 +49,17 @@ def main():
                     flushed=False,
                     page_size=PAGE_SIZE,
                     name_prefix="L3",
-                    index_function=IndexFunctionLibrary.get_L3_Index_Function_ROSE_NEW(
+                    index_function=IndexFunctionLibrary.get_rose_level_3_index_function(
                         L3_TOTAL_CAPACITY, L3_CACHELINE_CAPACITY, L3_ASSOC, ADDRESS_BUS_WIDTH
                     ))
     ]
 
     logging.info('L1 cache(s):')
-    PrettyPrinter.print_cache(l1_caches[0])
+    PageColoringModelPrettyPrinter.print_cache(l1_caches[0])
     logging.info('L2 cache(s):')
-    PrettyPrinter.print_cache(l2_caches[0])
+    PageColoringModelPrettyPrinter.print_cache(l2_caches[0])
     logging.info('L3 cache(s):')
-    PrettyPrinter.print_cache(l3_caches[0])
+    PageColoringModelPrettyPrinter.print_cache(l3_caches[0])
 
     assert(len(l3_caches) == 1), "#ASSMS-CACHE-CONFIG-2"
 
@@ -71,27 +73,26 @@ def main():
             # every CPU core gets the same L3 cache
             # assumes one L3 cache for all CPU cores #ASSMS-CACHE-CONFIG-2
             {(l3_cache, cpu) for (cpu, l3_cache) in zip(cpu_cores, itertools.cycle(l3_caches))}
-        ],
-        complex_indexing=False  # TODO: currently not supported
+        ]
     )
 
     logging.info("CPU cache configuration:")
-    PrettyPrinter.print_cpu_cache_config(cpu_cache_config)
+    PageColoringModelPrettyPrinter.print_cpu_cache_config(cpu_cache_config)
 
     hardware = Hardware(cpu_cache_config=cpu_cache_config, main_memory_size=MAIN_MEMORY_SIZE_GB * (1024 ** 3),
                         address_bus_width=ADDRESS_BUS_WIDTH, page_size=PAGE_SIZE)
 
-    logging.info("Number of usable colors per CPU (CPU page color): " + str(hardware.get_number_of_cpu_page_colors()))
-    logging.info("Number of all system page colors: " + str(hardware.get_number_of_system_page_colors()))
+    # TODO: To be reviewed. Do we still need get_number_of_cpu_page_colors?
+    # logging.info("Number of usable colors per CPU (CPU page color): " + str(hardware.get_number_of_cpu_page_colors()))
+    # TODO: To be reviewed. Do we still need get_number_of_system_page_colors?
+    # logging.info("Number of all system page colors: " + str(hardware.get_number_of_system_page_colors()))
 
-    PrettyPrinter.print_bar()
-
-    logging.info("System page colors:")
-    # TODO: Replace with simpler PrettyPrinter function
-    for system_page_color in hardware.get_all_system_page_colors():
-        print(system_page_color, end=' ')
-    print("")
-    PrettyPrinter.print_bar()
+    # logging.info("System page colors:")
+    # # TODO: Replace with simpler PrettyPrinter function
+    # for system_page_color in hardware.get_all_system_page_colors():
+    #     print(system_page_color, end=' ')
+    # print("")
+    # PrettyPrinter.print_bar()
 
     logging.info(
         "Modelling the following system:\n"
@@ -101,7 +102,7 @@ def main():
         "                             (Trusted Crypto) <-> (Untrusted Linux Public)\n"
         "                     (Untrusted Linux Public) <-> (Untrusted App)"
     )
-    PrettyPrinter.print_bar()
+    PageColoringModelPrettyPrinter.print_bar()
 
     # We specify an example system which not only consists of its hardware
     # but also of its memory consumers which either reserve a specific address range or have a
@@ -167,10 +168,10 @@ def main():
         {e['U_Linux_VS_NfD_2']},  # Cache isolation domain 5: NfD-2
         {e['U_Linux_Public'],  # Cache isolation domain 6: Public and Untrusted App
          e['U_App'], *e['U_Linux_Public'].get_inoutchannels(e['U_App'])},
-        {*e['T_CRYPTO'].get_inoutchannels(e['U_Linux_VS_V'])},  # Cache isolation domains
+        {*e['T_CRYPTO'].get_inoutchannels(e['U_Linux_VS_V'])},      # Cache isolation domains
         {*e['T_CRYPTO'].get_inoutchannels(e['U_Linux_VS_NfD_1'])},  # to prevent mutual interference
         {*e['T_CRYPTO'].get_inoutchannels(e['U_Linux_VS_NfD_2'])},  # from executors of
-        {*e['T_CRYPTO'].get_inoutchannels(e['U_Linux_Public'])},  # different cache isolation domains
+        {*e['T_CRYPTO'].get_inoutchannels(e['U_Linux_Public'])},    # different cache isolation domains
     ]
 
     # Specify which CPU must be used by executor.
@@ -185,46 +186,53 @@ def main():
         e['U_App']:             {cpu_cores[2], cpu_cores[3]}
     }
 
-    system = System(hardware=hardware, memory_consumers=all_memory_consumers)
+    system = System(
+        hardware=hardware,
+        memory_consumers=all_memory_consumers,
+        page_color_to_page_address_mapping_dump_file="data/page_color_to_page_address_mapping_dump.pkl")
 
     logging.info("Cache colors (Cache color = lists of affected sets by one memory page regarding one level of cache):")
-    PrettyPrinter.print_cache_colors(system)
+    PageColoringModelPrettyPrinter.print_cache_colors(system)
+
     logging.info("Page colors (Page color = lists of affected sets by one memory page regarding all levels of caches):")
-    PrettyPrinter.print_page_colors(system)
-    #PrettyPrinter.print_page_colors_clingo(system)
-    #PrettyPrinter.print_page_colors_clingo2(system)
+    PageColoringModelPrettyPrinter.print_page_colors(system)
+
     logging.info("System page colors (System page color: CPU + Page color):")
-    PrettyPrinter.print_system_page_colors(system)
-    #PrettyPrinter.print_system_page_colors_clingo(system)
+    PageColoringModelPrettyPrinter.print_system_page_colors(system)
 
     logging.info("Memory consumers:")
-    PrettyPrinter.print_memory_consumers(system)
+    PageColoringModelPrettyPrinter.print_memory_consumers(system)
 
     logging.info("Cache isolation domains:")
-    PrettyPrinter.print_cache_isolation_domains(cache_isolation_domains)
+    PageColoringModelPrettyPrinter.print_cache_isolation_domains(cache_isolation_domains)
 
     logging.info("Executor-CPU constraints:")
-    PrettyPrinter.print_executor_cpu_constraints(executor_cpu_constraints)
+    PageColoringModelPrettyPrinter.print_executor_cpu_constraints(executor_cpu_constraints)
 
     logging.info("Color assignment (with cache isolation domains method):")
-    assignment = ColorAssigner.get_assignment_by_cache_isolation_domains(
-        system, cache_isolation_domains, executor_cpu_constraints, cpu_access_constraints=None
-    )
-    ColorAssigner.apply_assignment(assignment)
+    PageColoringModelPrettyPrinter.print_bar()
 
-    PrettyPrinter.print_color_assignment(system)
+    assignment = ASPColorAssigner.get_assignment(system, cache_isolation_domains, executor_cpu_constraints)
+    ASPColorAssigner.apply_assignment(assignment)
+
+    PageColoringModelPrettyPrinter.print_color_assignment(system)
+
+    # TODO: Number of unassigned page colors.
+
     logging.info("Unassigned system page colors:")
-    PrettyPrinter.print_unassigned_colors(system, assignment)
-    # logging.info("Colors to address space mapping:")
-    # PrettyPrinter.print_system_page_colors_address_spaces(hardware.get_all_system_page_colors())
+    PageColoringModelPrettyPrinter.print_unassigned_system_page_colors(system, assignment)
 
-    logging.info("Clingo output:")
-    ClingoPrinter.print_executors(executors)
-    ClingoPrinter.print_channels(channels)
-    ClingoPrinter.print_cpus(cpu_cores)
-    ClingoPrinter.print_executor_cpu_constraints(executor_cpu_constraints)
-    ClingoPrinter.print_cache_colors(system)
-    ClingoPrinter.print_page_colors(system)
-    ClingoPrinter.print_cache_isolation_domains(cache_isolation_domains)
+    # TODO: Print MemoryConsumer to address space mapping
+
+    # logging.info("Clingo output:")
+    # ClingoPrinter.print_executors(executors)
+    # ClingoPrinter.print_channels(channels)
+    # ClingoPrinter.print_cpus(cpu_cores)
+    # ClingoPrinter.print_executor_cpu_constraints(executor_cpu_constraints)
+    # ClingoPrinter.print_cache_colors(system)
+    # ClingoPrinter.print_page_colors(system)
+    # ClingoPrinter.print_cache_isolation_domains(cache_isolation_domains)
+
+
 if __name__ == "__main__":
     main()

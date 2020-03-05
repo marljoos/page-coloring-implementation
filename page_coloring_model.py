@@ -1,30 +1,208 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
+import copy
 import logging
 import sys
-from typing import List, Dict, Set  # need this for specifying List/Dict/Set types for type hints
+from typing import List, Dict, Set, Tuple, Callable, FrozenSet
+from abc import ABC, abstractmethod
 
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 
 """
-This script models certain aspects of a page-coloring algorithm which will be
+This script models certain aspects of a page coloring algorithm which will be
 integrated into a separation kernel (SK) build system.
 """
 
 
-# TODO: Specification of bootstrap processor needed?
+class System:
+    """The system consists of all relevant information to infer page coloring information including hardware and
+    software (MemoryConsumers, Subjects, Kernel)"""
+
+    # Access to a page frame in physical memory will affect several cache sets of several cache levels.
+    # These affected cache sets represent a cache colors for their cache.
+    # This type should represent a type for such immutable cache sets, independently of a cache level.
+    AffectedCacheSets = FrozenSet[int]
+    # First list element, cache colors of L1 cache, second element, cache colors of L2 cache, ...
+    AllCacheColors = List[Dict['System.AffectedCacheSets', 'Hardware.CacheColor']]
+    PAGE_COLOR_TO_PAGE_ADDRESS_MAPPING_DEFAULT_PATH = "data/page_color_to_page_address_mapping_dump.pkl"
+
+    def __init__(
+            self,
+            hardware: 'Hardware',
+            memory_consumers: List['MemoryConsumer'],
+            page_color_to_page_address_mapping_dump_file=None):
+
+        self._hardware = hardware
+        self._memory_consumers = memory_consumers
+
+        self._cache_colors = self._construct_cache_colors(hardware)
+        self._page_colors = self._construct_page_colors(hardware, self._cache_colors)
+
+        self._page_color_to_page_address_mapping = None
+
+        # If page-color-to-page-address-mapping-dump-file is given, try to load it.
+        # If this fails recalculate page-co-or-to-page-address-mapping (This can take very long and should be done with
+        # the Cython version for performance reasons
+        if page_color_to_page_address_mapping_dump_file:
+            self._page_color_to_page_address_mapping = \
+                self._load_page_color_to_page_address_mapping(page_color_to_page_address_mapping_dump_file)
+
+        if self._page_color_to_page_address_mapping is None:
+            self._page_color_to_page_address_mapping = \
+                self._construct_page_color_to_page_address_mapping(hardware, self._cache_colors)
+
+        self._system_page_colors = self._construct_system_page_colors(hardware, self._page_colors)
+
+    def get_all_memory_consumers(self):
+        return self._memory_consumers
+
+    def get_hardware(self):
+        return self._hardware
+
+    @staticmethod
+    def _construct_cache_colors(hardware: 'Hardware') -> AllCacheColors:
+        """Construct all cache colors of a hardware.
+
+        Algorithm idea: Use minimal amount of page addresses/pages, and apply index function (See IndexFunction class)
+        of all cacheline_capacity sized chunks of each page.
+        """
+
+        num_of_cache_levels: int = hardware.get_number_of_cache_levels()
+        cache_colors: List[Dict[System.AffectedCacheSets, Hardware.CacheColor]] = \
+            [{} for _ in range(num_of_cache_levels)]
+        page_size = hardware.get_page_size()
+
+        page_addresses = hardware.get_page_addresses()
+        cache_of_level = hardware.get_cache_information()
+
+        for level, cache_colors_current_level in enumerate(cache_colors, start=1):
+            number_of_colors = cache_of_level[level - 1].get_number_of_colors()
+            cacheline_capacity = cache_of_level[level - 1].get_cacheline_capacity()
+
+            # Apply index function of cache to as many pages as number of colors of cache
+            index_function = cache_of_level[level - 1].get_index_function()
+            pages = list(page_addresses)[:number_of_colors]
+
+            for i, page_address in enumerate(pages):
+                affected_cache_sets_of_page = frozenset(list(map(
+                    index_function,
+                    range(page_address, page_address + page_size, cacheline_capacity)
+                )))
+
+                # Add CacheColor to dict
+                cache_colors[level - 1][affected_cache_sets_of_page] = \
+                    Hardware.CacheColor(name_prefix="L" + str(level), cache_sets=affected_cache_sets_of_page)
+
+            assert(len(cache_colors[level - 1]) == number_of_colors),\
+                "Not as many cache colors calculated as specified.\n"\
+                "Cache level: " + str(level) + "\n"\
+                "Calculated: " + str(len(cache_colors[level - 1])) + "\n"\
+                "Expected: " + str(number_of_colors)
+
+        return cache_colors
+
+    def _construct_page_colors(self, hardware: 'Hardware', cache_colors: AllCacheColors):
+        page_colors: List[Hardware.PageColor] = []
+        num_of_cache_levels: int = hardware.get_number_of_cache_levels()
+        cache_of_level = hardware.get_cache_information()
+        page_size = hardware.get_page_size()
+        page_addresses = hardware.get_page_addresses()
+        # number of colors of last level cache (e. g. L3)
+        number_of_colors = cache_of_level[num_of_cache_levels - 1].get_number_of_colors()
+        pages = list(page_addresses)[:number_of_colors]
+
+        for page_address in pages:
+            all_cache_colors_of_page_color: List[Hardware.CacheColor] = []
+            for i in range(num_of_cache_levels):
+                index_function = cache_of_level[i].get_index_function()
+                affected_cache_sets_of_page = frozenset(map(
+                    index_function,
+                    range(page_address, page_address + page_size, cache_of_level[i].get_cacheline_capacity())
+                ))
+
+                all_cache_colors_of_page_color.append(cache_colors[i][affected_cache_sets_of_page])
+
+            page_colors.append(Hardware.PageColor(all_cache_colors_of_page_color))
+
+        return page_colors
+
+    @staticmethod
+    def _load_page_color_to_page_address_mapping(page_color_to_page_address_mapping_dump_file):
+        """Loads page color to page address mapping from file."""
+        import pickle
+        with open(page_color_to_page_address_mapping_dump_file, 'rb') as input:
+            return pickle.load(input)
+
+    def _construct_page_color_to_page_address_mapping(self, hardware: 'Hardware', cache_colors: AllCacheColors):
+        num_of_cache_levels: int = hardware.get_number_of_cache_levels()
+        cache_of_level = hardware.get_cache_information()
+        page_size = hardware.get_page_size()
+        page_addresses = hardware.get_page_addresses()
+        page_color_to_page_address_mapping = {page_color: set() for page_color in self._page_colors}
+
+        logging.info("_construct_page_color_to_page_address_mapping: Construct PageColor to page address mapping ...")
+        for page_address in page_addresses:
+            all_cache_colors_of_page_color: List[Hardware.CacheColor] = []
+            for i in range(num_of_cache_levels):
+                index_function = cache_of_level[i].get_index_function()
+                affected_cache_sets_of_page = frozenset(map(
+                    index_function,
+                    range(page_address, page_address + page_size, cache_of_level[i].get_cacheline_capacity())
+                ))
+
+                all_cache_colors_of_page_color.append(cache_colors[i][affected_cache_sets_of_page])
+
+            page_color_to_page_address_mapping[Hardware.PageColor(all_cache_colors_of_page_color)].add(page_address)
+
+        logging.info("_construct_page_color_to_page_address_mapping: Finished.")
+
+        # Because constructing page color to page address mapping can take a lot of time
+        # (especially for large address spaces) a backup of of the mapping is saved to disk and can be reused later.
+        logging.info("_construct_page_color_to_page_address_mapping: Saving to file...")
+        import pickle
+        with open(self.PAGE_COLOR_TO_PAGE_ADDRESS_MAPPING_DEFAULT_PATH, 'wb') as output:
+            pickle.dump(page_color_to_page_address_mapping, output, pickle.HIGHEST_PROTOCOL)
+        logging.info("_construct_page_color_to_page_address_mapping: Finished.")
+
+        return page_color_to_page_address_mapping
+
+    @staticmethod
+    def _construct_system_page_colors(hardware: 'Hardware', page_colors: List['Hardware.PageColors']):
+        # TODO: Maybe add some validity checks. I've had a bug in here which computed wrong SystemPageColors.
+        cpu_cores = hardware.get_cpu_cores()
+
+        system_page_colors: List[Hardware.SystemPageColor] = []
+        for page_color in page_colors:
+            for cpu in cpu_cores:
+                system_page_colors.append(Hardware.SystemPageColor(cpu, page_color))
+
+        return system_page_colors
+
+    def get_cache_colors(self):
+        return self._cache_colors
+
+    def get_page_colors(self):
+        return self._page_colors
+
+    def get_system_page_colors(self):
+        return self._system_page_colors
+
+
 class Hardware:
     """Description of a hardware system which consists of CPU cores, main memory and (multiple layers) of caches."""
 
     class CPU:
         cpu_namespace = []
-        cpu_ctr = 0
+        cpu_ctr = 1
 
         def __init__(self, name: str = None):
+            self.id = Hardware.CPU.cpu_ctr
+
             if name is None:  # if name is not specified, name is "CPU_$cpu_ctr"
-                name = str(Hardware.CPU.cpu_ctr)
-                Hardware.CPU.cpu_ctr += 1
+                name = str(self.id)
+
+            Hardware.CPU.cpu_ctr += 1
+
             assert name not in Hardware.CPU.cpu_namespace, "CPU core names must be unique."
             Hardware.CPU.cpu_namespace.append(name)
             self.name = name
@@ -32,20 +210,30 @@ class Hardware:
         def __str__(self):
             return "CPU_" + self.name
 
+        def __hash__(self):
+            return hash(str(self))
+
+        def __eq__(self, other):
+            return isinstance(other, Hardware.CPU) and str(self) == str(other)
+
+        def get_id(self):
+            return self.id
+
     class CPUCacheConfig:
+        """The CPU Cache configuration contains all relevant information about the relationship between the CPU cores
+        of the system and the caches."""
+
         def __init__(self,
                      caches: List[List['Cache']],
                      cpu_cores: List['Hardware.CPU'],
-                     cache_cpu_mappings: List[Dict['Cache', 'Hardware.CPU']],
-                     complex_indexing: bool = False  # TODO: Currently not supported, maybe assigning indexing function
-                                                     # instead of boolean
-        ):
+                     cache_cpu_mappings: List[Set[Tuple['Cache', 'Hardware.CPU']]]
+                     ):
             """
             Args:
                 caches: List of list of caches, where the first element designates the list of L1 caches,
-                the second element, designates the list of L2 caches, etc.
+                the second element designates the list of L2 caches, etc.
                 cpu_cores: List of CPU cores of the system.
-                cache_cpu_mappings: List of mappings (in form of a dictionary) from a cache to a CPU core.
+                cache_cpu_mappings: List of mappings (in form of a set of tuples) from a cache to a CPU core.
                 The first element designates the mappings of the L1 caches, the second element the mappings of the L2
                 caches etc.
             """
@@ -55,14 +243,14 @@ class Hardware:
             assert len(cpu_cores) == len(set(cpu_cores)), "All CPU cores must be unique."
             assert len(caches) == len(cache_cpu_mappings),\
                 "Number of cache levels (L1, L2, ...) is number of mappings (L1->CPU, L2->CPU, ...)."
-            all_mappings_in_one_dict = \
-                {cache: cpu for mapping in cache_cpu_mappings for cache, cpu in mapping.items()}
-            assert all((cache in all_mappings_in_one_dict) for cache in all_caches_of_all_levels),\
+            all_assigned_caches = \
+                {cache for mapping in cache_cpu_mappings for cache, cpu in mapping}
+            assert all((cache in all_assigned_caches) for cache in all_caches_of_all_levels),\
                 "Each cache must be assigned to a CPU core."
 
             # We also assume that the caches of one cache level are structurally the same.
             # So it's forbidden to have one L1 cache which is flushed, while others are not flushed,
-            # or one L2 cache which has a cacheline_capacity of 64, while another L2 cache has not.
+            # or one L2 cache which has a cacheline_capacity of 64, while another L2 cache has a different.
             # #ASSMS-STRUCTURALLY-SAME-CACHES-ONE-SAME-LEVEL-1
 
             self.caches = caches
@@ -83,99 +271,171 @@ class Hardware:
             """
             return self.cpu_cores
 
-    class SystemPageColor:
-        """A system page color is a tuple of CPU and int whereas the first element designates a CPU core
-        and the second element designates a CPU page color.
+    class CacheColor:
+        """
+        A CacheColor is a cache set of a cache of a cache level which is affected as soon a a class of pages
+        (page addresses) is accessed.
+        """
 
-        Note the difference (CPU_0, 3) is a possible SystemPageColor, whereas 3 is the CPU page color, which indexes
-        a page color within a CPU core.
+        cache_color_ctr: Dict[str, int] = {}
 
-        E. g. (CPU_0, 0), (CPU_1, 3), (CPU_3, 127) are valid system page colors on a system with three CPU cores
-        and 128 CPU page colors."""
-        def __init__(self, cpu: 'Hardware.CPU', cpu_page_color: int):
-            self.cpu = cpu
-            self.cpu_page_color = cpu_page_color
+        @classmethod
+        def increase_and_get_cache_color_counter(cls, name_prefix: str):
+            if name_prefix not in cls.cache_color_ctr:
+                cls.cache_color_ctr[name_prefix] = 1
+            else:
+                cls.cache_color_ctr[name_prefix] += 1
+
+            return cls.cache_color_ctr[name_prefix]
+
+        def __init__(self, name_prefix: str, cache_sets: FrozenSet[int]):
+            self.cache_sets = cache_sets
+            self.name_prefix = name_prefix
+            self.id = Hardware.CacheColor.increase_and_get_cache_color_counter(name_prefix)
+
+        def get_cache_sets(self):
+            return self.cache_sets
 
         def __str__(self):
-            return str((str(self.cpu), self.cpu_page_color))
+            return "CC(" + self.name_prefix + "_" + str(self.id) + ")"
+
+        def get_id(self):
+            return str(self.id)
+
+    class PageColor:
+        """A PageColor is a list of CacheColors. The first list element refers to the CacheColor of the L1 cache,
+        the second element to the CacheColor of the L2 cache, ..."""
+
+        def __init__(self, cache_colors: List['Hardware.CacheColor']):
+            self.cache_colors = cache_colors
+
+        def __str__(self):
+            return 'PC(' + str([str(cache_color) for cache_color in self.cache_colors]) + ')'
+
+        def __hash__(self):
+            return hash(str(self))
+
+        def __eq__(self, other):
+            # TODO: Review
+            assert self.cache_colors == other.get_cache_colors()
+            return isinstance(other, Hardware.PageColor) and str(self) == str(other)
+
+        def get_cache_colors(self):
+            return self.cache_colors
+
+    class SystemPageColor:
+        """A SystemPageColor consists of a CPU and a PageColor and can fully identify caches of all levels which are
+        affected as soon as a CPU accesses a page.
+
+        E. g. SystemPageColor SPC(CPU_2, PC(['CC(L1_1)', 'CC(L2_5)', 'CC(L3_85)']))
+        refers to a SystemPageColor which is "touched" as soon as CPU_2 is accessing a page which results in
+        affecting the PageColor with the CacheColors L1_1, L2_5 and L3_85. If e. g. L1 and L2 caches are CPU bound
+        (that means CPUs have their own exclusive L1 and L2 cache), we can fully identify the physical caches touched
+        (L1_1 of CPU_2, L2_5 of CPU_2).
+
+        Note that not all SystemPageColors must be assigned resp. can be assigned under certain security circumstances.
+        E. g. if Subject1 is only running on CPU_1, belongs to its own exclusive cache isolation domain
+        (without others members) and gets the SystemPagecolor
+        SPC(CPU_1, PC(['CC(L1_1)', 'CC(L2_5)', 'CC(L3_85)'])) assigned. Then no other MemoryConsumer may get
+        SystemPageColor SPC(A, PC(['CC(L1_1)', 'CC(L2_5)', 'CC(L3_85)'])) for each A in (CPU_1, CPU_2, ...)
+        because L3 may be a CPU shared cache and security-sensitive cache interference in CC(L3_85) would happen.
+        """
+
+        def __init__(self, cpu: 'Hardware.CPU', page_color: 'Hardware.PageColor'):
+            self.cpu = cpu
+            self.page_color = page_color
+
+        def __str__(self):
+            return "SPC(" + str(self.cpu) + ", " + str(self.page_color) + ")"
 
         def __hash__(self):
             return hash(str(self))
 
         def __eq__(self, other):
             return (isinstance(other, Hardware.SystemPageColor) and
-                    self.cpu == other.cpu and self.cpu_page_color == other.cpu_page_color)
+                    self.cpu == other.get_cpu() and self.page_color == other.get_page_color())
 
         def get_cpu(self):
             return self.cpu
 
-        def get_cpu_page_color(self):
-            return self.cpu_page_color
+        def get_page_color(self):
+            return self.page_color
 
-    def __init__(self, cpu_cache_config: CPUCacheConfig, page_size: int = 4096):
+    def __init__(self, cpu_cache_config: CPUCacheConfig, main_memory_size: int, address_bus_width: int,
+                 page_size: int = 4096):
         """
         Args:
+            address_bus_width:
             cpu_cache_config: Complex data structure which describes CPU cores, caches and their mappings to the
             CPU cores.
             page_size: Page size in bytes.
+            main_memory_size: Main memory size in bytes.
         """
-        # TODO: Implement initialization
-        self.cpu_cache_config = cpu_cache_config
+        assert main_memory_size % page_size == 0, "Main memory size must be dividable by page size."
+        assert address_bus_width == 32 or address_bus_width == 64, "Only 32-bit or 64-bit address buses are supported."
+        assert 2**address_bus_width > main_memory_size, "Given address bus width cannot handle given main memory size."
 
-    def get_number_of_cpu_page_colors(self) -> int:
-        """
-        Returns the number of CPU page colors of the system.
+        self._cpu_cache_config = cpu_cache_config
+        self._main_memory_size = main_memory_size
+        self._page_size = page_size
+        self._address_bus_width = address_bus_width
 
-        So if the system has 4 CPU cores, an one CPU core has SystemPageColors from (CPU_X, 0) to (CPU_X, 127) the
-        system has 128 CPU page colors.
+        self._page_addresses = range(0, self._main_memory_size, self._page_size)
 
-        Note this is not the number of all usable system page colors of the system.
-        """
-
-        colors_of_one_cache = 0
-        for caches_of_same_level in self.cpu_cache_config.get_caches():
-            colors_of_one_cache = caches_of_same_level[0].get_colors()
-            if caches_of_same_level[0].get_flushed():
-                continue
-            else:
-                break
-
-        assert colors_of_one_cache > 0
-        return colors_of_one_cache
-
-    def get_number_of_system_page_colors(self) -> int:
-        # number of system page colors is number of cpu page colors times the number of CPU cores
-        number_of_system_page_colors = self.get_number_of_cpu_page_colors() * len(self.get_cpu_cores())
-        return number_of_system_page_colors
-
-    def get_all_system_page_colors(self):
-        """Returns the list of all system page colors sorted by page color (int).
-
-        Returns:
-            List[SystemPageColor]: List of all system page colors sorted by page color (int), so that it's easy to
-                distribute system page colors of all CPU core equally:
-                (CPU_0,0), (CPU_1,0), (CPU_0, 1), (CPU_1, 1), ...
-        """
-        # (CPU_0,0), (CPU_1,0), (CPU_0, 1), (CPU_1, 1), ...
-        all_system_page_colors = [Hardware.SystemPageColor(cpu, cpu_page_color)
-                                  for cpu_page_color in range(self.get_number_of_cpu_page_colors())
-                                  for cpu in self.cpu_cache_config.get_cpu_cores()]
-        return all_system_page_colors
+    def get_page_size(self):
+        return self._page_size
 
     def get_cpu_cores(self):
-        return self.cpu_cache_config.get_cpu_cores()
+        return self._cpu_cache_config.get_cpu_cores()
+
+    def get_cache_information(self) -> List['Cache']:
+        """Returns a list of one cache of each cache level of the hardware, so that information about the caches can be
+        obtained.
+
+        This assumes, that all caches of a specific cache level deliver the same information see:
+        #ASSMS-STRUCTURALLY-SAME-CACHES-ONE-SAME-LEVEL-1
+        """
+
+        cache_information: List[Cache] = []
+        for caches_of_one_level in self._cpu_cache_config.get_caches():
+            # TODO: Possibly bad style.
+            cache_information.append(copy.deepcopy(caches_of_one_level[0]))
+
+        return cache_information
+
+    def get_page_addresses(self):
+        return self._page_addresses
+
+    def get_address_bus_width(self):
+        return self._address_bus_width
+
+    def get_number_of_cache_levels(self):
+        return len(self._cpu_cache_config.get_caches())
 
 
 class Cache:
     """Description of a CPU cache."""
+    _cache_namespace = []
+    _cache_ctr = 0
+
+    # And index function maps a memory address to a unique numerical identifier of a Set of a Cache.
+    IndexFunction = Callable[[int], int]
+
+    @staticmethod
+    def default_index_function(cacheline_capacity: int, number_of_sets: int) -> IndexFunction:
+        from math import floor
+        return lambda x: int(floor(x / cacheline_capacity)) % (number_of_sets)
 
     def __init__(self,
                  total_capacity: int,
                  associativity: int,
                  cacheline_capacity: int,
-                 shared: bool = False,  # TODO: documentation,
+                 shared: bool = False,  # TODO: Documentation
                  flushed: bool = False,
-                 page_size: int = 4096):
+                 page_size: int = 4096,
+                 name_prefix: str = None,  # TODO: Documentation
+                 index_function: IndexFunction = None  # TODO: Documentation
+                 ):
         """
         Args:
             total_capacity: Total capacity of cache in bytes.
@@ -185,11 +445,22 @@ class Cache:
                 colors of higher level caches.
             page_size: Page size in bytes.
         """
-        self.flushed = flushed
-        self.total_capacity = total_capacity
-        self.associativity = associativity
-        self.cacheline_capacity = cacheline_capacity
-        self.sets = self.total_capacity / (self.associativity * self.cacheline_capacity)
+
+        if name_prefix is None:  # if name_prefix is not specified, name is "Cache_$(cache_ctr)_X"
+            self._name = "Cache_" + str(Cache._cache_ctr) + "_X"
+        else:  # else name is Cache_$(cache_ctr)_$(name_prefix)
+            self._name = "Cache_" + str(Cache._cache_ctr) + "_" + name_prefix
+        assert self._name not in Cache._cache_namespace, "Cache names must be unique."
+
+        Cache._cache_ctr += 1
+        Cache._cache_namespace.append(self._name)
+
+        self._flushed = flushed
+        self._shared = shared
+        self._total_capacity = total_capacity
+        self._associativity = associativity
+        self._cacheline_capacity = cacheline_capacity
+        self._sets = self._total_capacity / (self._associativity * self._cacheline_capacity)
 
         # The access of one page frame affects several sets of a cache.
         # The number of these affected sets depends not only on the page size
@@ -197,7 +468,7 @@ class Cache:
         # We assume that the first $cacheline_capacity bytes of the page frame is allocated
         # to the first set of the cache, the second $cacheline_capacity bytes to
         # the second set etc. #ASSMS-CACHE-MAPPING
-        self.affected_sets_per_page = page_size / self.cacheline_capacity
+        self._affected_sets_per_page = page_size / self._cacheline_capacity
 
         # All by one page frame affected sets are assigned to one color.
         # We assume that a page frame owns the whole affected set even if it actually
@@ -205,58 +476,55 @@ class Cache:
         # Depending on the replacement policy of the cache you in theory could use the
         # other cache lines for other colors as long other consumed cache lines aren't replaced.
         # So we assume a strict form of "coloring strategy" here. #ASSMS-COLORING-STRATEGY
-        self.colors = self.sets / (page_size / self.cacheline_capacity)
+        self._number_of_colors = self._sets / (page_size / self._cacheline_capacity)
 
         # We assume that all numbers defined here must be integer (no floats), otherwise there is something wrong
         # #ASSMS-CACHE-PROPS-ONLY-INTS
-        assert (self.sets.is_integer()), "#ASSMS-CACHE-PROPS-ONLY-INTS"
-        assert (self.affected_sets_per_page.is_integer()), "#ASSMS-CACHE-PROPS-ONLY-INTS"
-        assert (self.colors.is_integer()), "#ASSMS-CACHE-PROPS-ONLY-INTS"
-        self.sets = int(self.sets)
-        self.affected_sets_per_page = int(self.affected_sets_per_page)
-        self.colors = int(self.colors)
+        assert (self._sets.is_integer()), "#ASSMS-CACHE-PROPS-ONLY-INTS"
+        assert (self._affected_sets_per_page.is_integer()), "#ASSMS-CACHE-PROPS-ONLY-INTS"
+        assert (self._number_of_colors.is_integer()), "#ASSMS-CACHE-PROPS-ONLY-INTS"
+        self._sets = int(self._sets)
+        self._affected_sets_per_page = int(self._affected_sets_per_page)
+        self._number_of_colors = int(self._number_of_colors)
 
-    def get_colors(self):
-        return self.colors
+        if index_function:
+            self._index_function = index_function
+        else:
+            self._index_function = Cache.default_index_function(
+                cacheline_capacity=self._cacheline_capacity,
+                number_of_sets=self._sets
+            )
+
+    def get_number_of_colors(self):
+        return self._number_of_colors
 
     def get_flushed(self):
-        return self.flushed
+        return self._flushed
+
+    def __str__(self):
+        return self._name
+
+    def get_number_of_sets(self):
+        return self._sets
+
+    def get_cacheline_capacity(self):
+        return self._cacheline_capacity
+
+    def get_index_function(self):
+        return self._index_function
+
+    def get_shared(self):
+        return self._shared
 
 
 class Executor:
     """Designates entities which are executed on the system (e. g. kernel, subjects)."""
     def __init__(self):
-        self.classification = None
-        self.compartment = None
-
-    def set_security_label(self, classification: int, compartment: Set[int]):
-        """
-        Set the security label of an executable entity. The assignment of security labels to executable entities
-        effectively establishes a lattice of security labels which establishes a security hierarchy between
-        labeled entities. A security label can be constructed from a classification and a set of codewords which
-        defines a compartment.
-        Entity_X has a higher or equal security clearance than Entity_Y
-            <=> Entity_X.classification <= Entity_X.classification AND
-                Entity_X.compartment is the same set or a proper superset of Entity_Y.compartment
-
-        Args:
-            classification: The classification of the executable entity. The *lower* the higher the classification.
-                E. g. use 0=TOP SECRET, 1=SECRET, 2=UNCLASSIFIED, ...
-            compartment: Set of codewords which defines a compartment.
-                E. g. use something like {0, 1, 2} for {CRYPTO, FOREIGN, SECRET_PROJECTX}, and
-                {0,2} for {CRYPTO, SECRET_PROJECTX}
-        """
-        self.classification = classification
-        self.compartment = compartment
-
-    def get_security_label(self):
-        assert (self.classification is not None) and (self.compartment is not None),\
-            "Classification and compartment must both be defined."
-        return self.classification, self.compartment
+        pass
 
 
 class MemoryConsumer:
-    """A MemoryConsumer represents memory consuming objects like subjects or channels.
+    """A MemoryConsumer represents memory consuming objects like kernels, subjects or channels.
 
     A MemoryConsumer consumes certain memory of size $memsize > 0
     and may get assigned an address space of size $memsize and a color
@@ -264,35 +532,43 @@ class MemoryConsumer:
     A MemoryConsumer may also have a list of Executors which are accessing (read/write/execute) the memory region.
     """
 
-    def __init__(self, memsize: int, page_size: int = 4096):
+    def __init__(self, name: str, memory_size: int, page_size: int = 4096):
         """
         Args:
-            memsize: Memory size of memory consumer in bytes.
+            memory_size: Memory size of memory consumer in bytes.
             page_size: Page size in bytes.
         """
-        assert memsize % page_size == 0, "Memory size of memory consume must be a multiple of page size."
-        assert memsize > 0, "Memory size must be positive."
 
-        self.address_space = None
-        self.memsize = memsize
-        self.color = None
-        self.executors: List[Executor] = []
-        self.colors = []
+        assert memory_size % page_size == 0, "Memory size of memory consume must be a multiple of page size."
+        assert memory_size > 0, "Memory size must be positive."
+
+        self._name = name
+        self._address_space = None
+        self._memory_size = memory_size
+        self._color = None
+        self._executors: List[Executor] = []  # TODO: Documentation
+        self._colors = []
+
+    def get_name(self):
+        return self._name
+
+    def get_memory_size(self):
+        return self._memory_size
 
     def reset_colors(self):
-        self.colors = []
+        self._colors = []
 
     def add_color(self, color: Hardware.SystemPageColor):
-        self.colors.append(color)
+        self._colors.append(color)
 
     def get_colors(self):
-        return self.colors
+        return self._colors
 
     def add_executor(self, executor: Executor):
-        self.executors.append(executor)
+        self._executors.append(executor)
 
     def get_executors(self):
-        return self.executors
+        return self._executors
 
     def set_address_space(self, address_space: List[range]):
         def __address_space_size(address_space: List[range]) -> int:
@@ -311,21 +587,21 @@ class MemoryConsumer:
             return n == len(union)
 
         assert len(address_space) > 0, "There must be at least one range of addresses specified."
-        assert __address_space_size(address_space) == self.memsize,\
+        assert __address_space_size(address_space) == self._memory_size,\
             "Size of specified address space must comply to the memory requirement/size of the MemoryConsumer."
         assert __address_space_not_overlapping(address_space),\
             "Address ranges must not be overlapping."
 
-        self.address_space = address_space
+        self._address_space = address_space
 
     def get_address_space(self):
-        return self.address_space
+        return self._address_space
 
 
 # We assume that Kernel memory pages can also be colored easily. #ASSMS-KERNEL-PAGE-COLORING
 class Kernel(MemoryConsumer, Executor):
-    def __init__(self, memsize):
-        super().__init__(memsize)
+    def __init__(self, name, memory_size):
+        super().__init__(name, memory_size)
 
         self.add_executor(self)
 
@@ -336,8 +612,8 @@ class Subject(MemoryConsumer, Executor):
     It has a memory requirement (in Byte) and may have channels to other subjects.
     """
 
-    def __init__(self, memsize):
-        super().__init__(memsize)
+    def __init__(self, name, memory_size):
+        super().__init__(name, memory_size)
 
         self.inchannels: Dict[Subject, List[Channel]] = {}
         self.outchannels: Dict[Subject, List[Channel]] = {}
@@ -369,7 +645,7 @@ class Subject(MemoryConsumer, Executor):
         return all_inchannels + all_outchannels
 
     def get_inoutchannels(self, subject: 'Subject'):
-        """Returns all out channels to given subject and all in channels from given subject.
+        """Returns all out channels to the given subject and all in channels from the given subject.
 
         Returns:
             List[Channel]: All out channels to given subject and all in channels from given subject.
@@ -379,12 +655,12 @@ class Subject(MemoryConsumer, Executor):
 
 
 class Channel(MemoryConsumer):
-    """A channel represents an unidirectional communication relationship between
-    a source subject and a target subject and as well has a memory requirement (in Byte).
+    """A Channel represents an unidirectional communication relationship between
+    a source subject and a target subject. A Channel has a memory requirement (in Byte).
     """
 
-    def __init__(self, memsize, source: Subject, target: Subject):
-        super().__init__(memsize)
+    def __init__(self, name: str, memory_size: int, source: Subject, target: Subject):
+        super().__init__(name, memory_size)
         self.source = source
         self.target = target
 
@@ -401,170 +677,24 @@ class Channel(MemoryConsumer):
         return self.target
 
 
-###############################################################################
+class ColorAssigner(ABC):
+    """Meta class responsible for assigning colors to MemoryConsumers."""
 
-def print_memory_consumer(all_memory_consumers: Dict[str, MemoryConsumer]) -> None:
-    def print_bar():
-        print("=" * 85)
+    class ColorAssignmentException(Exception):
+        pass
 
-    fmt1 = '{0: <45}'
-    fmt2 = '{0: <10}'
-
-    print_bar()
-    print(fmt1.format('Memory Consumer')
-          + ' : ' + fmt2.format('Color(s)')
-    #     + ' : ' + fmt2.format('Address Space')
-          )
-    print_bar()
-    for name, memory_consumer in all_memory_consumers.items():
-        colors = ''.join(str(color) for color in memory_consumer.get_colors())
-        print(fmt1.format(name)
-              + ' : ' + fmt2.format(colors)
-        #     + ' : ' + fmt1.format(str(memory_consumer.get_address_space()))
-              )
-    print_bar()
-    # TODO: Print number of used and unassigned colors.
-
-
-# TODO: move to System class
-def print_channels():
-    pass
-
-
-# TODO: move to System class
-def print_system_page_colors_address_spaces(system_page_colors):
-    # params:
-    # - list of colors, ordered;
-    #   - need specification of ordering of colors,
-    #   - is (CPU_1, 0) color 2 (after (CPU_0, 0) ) or color 9 (color after (CPU_0, $LAST_CPU_PAGE_COLOR) )
-    # - MEMSIZE / MEMRANGES
-    # - complex indexing / indexing function
-    def print_bar():
-        print("=" * 85)
-
-    # address_space: List[range]
-
-    def assign_address_spaces(system_page_colors):
-        """
-        Example for 32 bit addresses:
-
-        1098765432109 87654 32109876 543210
-                      |   |  |     | |    |
-                      |   |  |     | +--->+--> Depending on cache line size (here assuming 64 Bytes):
-                      |   |  |     |           - Bit 0 to Bit 5: Bytes within cache line
-                      |   |  |     |
-                      |   |  +-----|---------> Depending on page size (here assuming 4096 bytes (taking 12 bits):
-                      |   |        |           - From Bit 12 to MSB: Real page frame index which can be used for
-                      |   |        |             assigning page frames
-                      |   |        |             - These bits without System Page Color index bits:
-                      |   |        |               -> Logical page frame index
-                      |   |        |
-                      +------------+---------> Depending on the number of sets of the last level cache
-                      |   |                       (here assuming 8192 sets of the L3 cache -> 13 Bits):
-                      |   |                    - Bit 6 to Bit 18: Set index (enumerates the sets of the L3 cache)
-                      |   |
-                      +---+------------------> Depending on the size of the Set index and the number of
-                                                System Page Colors
-                                                  (here assuming a Set index width of 13 Bits, and 32 (5 Bits) as number
-                                                   of all System Page Colors, e. g. a 4 CPU core system with 8 CPU Page
-                                                   Colors from (CPU_0, 0) to (CPU_3, 7) )
-                                               - Bit 14 to Bit 18: System Page Color index
-                                                      (used to map System Page Colors to assignable address ranges)
-                                                 - SystemPageColors'BitWidth most significant bits of Set index
-
-        Example mapping of System Page Color to address ranges (assuming (CPU_0, 0) has color index 0) using a bitmask:
-                      1098765432109 87654 32109876 543210
-        (CPU_0, 0) -> XXXXXXXXXXXXX 00000 XX------ ------
-           ...
-        (CPU_3, 7) -> XXXXXXXXXXXXX 11111 XX------ ------
-
-            All X's comprises the logical page frame index. So the first page frame which can be used by (CPU_0, 0) is
-            1098765432109 87654 32109876 543210
-            0000000000000 00000 00------ ------
-            and the last page frame which can be used by (CPU_0, 0) is
-            1098765432109 87654 32109876 543210
-            1111111111111 00000 11------ ------
-
-        Args:
-            system_page_colors:
-
-        Returns:
-
-        """
-        mapping = {system_page_color: set() for system_page_color in system_page_colors}
-
-        # TODO: no hardcoded stuff
-        import math
-        all_bits = 32  # 32-bit address space
-        cache_line_size = 64
-        num_llc_sets = 8192
-        num_system_page_colors = len(system_page_colors)
-        page_size = 4096
-
-        cache_line_bits = int(math.log2(cache_line_size))
-        set_index_bits = int(math.log2(num_llc_sets))
-        color_index_bits = int(math.log2(num_system_page_colors))
-
-        msb_color_index = cache_line_bits + set_index_bits
-        lsb_color_index = msb_color_index - color_index_bits
-        lsb_page_frame_index = int(math.log2(page_size))
-
-        bitmask_raw = "X"*all_bits
-        # mark all bits within page frame
-        bitmask_raw = "-"*lsb_page_frame_index + bitmask_raw[lsb_page_frame_index:]
-        # set color index
-        bitmask_raw = bitmask_raw[0:lsb_color_index] + "00000" + bitmask_raw[msb_color_index:]
-
-        print("bitmask_raw=" + bitmask_raw)
-        print("bitmask_new=" + bitmask_raw[0:lsb_color_index] + format(5, '05b')[::-1] + bitmask_raw[msb_color_index:])
-
-        color_cnt = 0
-        for system_page_color, bitmask in mapping.items():
-            b = bitmask_raw[0:lsb_color_index] + format(color_cnt, '05b')[::-1] + bitmask_raw[msb_color_index:]
-            mapping[system_page_color] = b[::-1]
-            color_cnt += 1
-
-        return mapping
-
-    color_addrspace_mapping = assign_address_spaces(system_page_colors)
-
-    fmt1 = '{0: <17}'
-    fmt2 = '{0: <10}'
-
-    print_bar()
-    print(fmt1.format('System Page Color')
-          + ' : ' + fmt2.format('Address space(s)')
-          )
-    print_bar()
-
-    for system_page_color, address_spaces in color_addrspace_mapping.items():
-        print(fmt1.format(str(system_page_color))
-              + ' : ' + fmt2.format(str(address_spaces))
-              )
-
-    print_bar()
-
-
-class ColorAssigner:
-    """Responsible for assigning colors to MemoryConsumers.
-
-    They're currently four assignment methods:
-    1. naive: Just distribute system page colors to each memory consumer so that each CPU cores
-              are distributed equally to the memory consumers. It's equivalent when using the interference domains
-              method with an empty interference domains list.
-    2. with interference domains: Specify sets of memory consumers which may interfere which each other.
-    3. with security labels: Assign system page colors according to the security labels of the memory consumers
-                             so that no memory consumer can cache-interfere with higher-clearance memory consumers
-                             and no memory consumer can cache-interfere with memory consumers with different
-                             compartment.
-    4. with cache isolation domains: TODO
-    """
-
-    class ColorExhaustion(Exception):
+    class ColorExhaustion(ColorAssignmentException):
         def __init__(self):
             default_message = "There are not enough colors to distribute. "\
                               "Maybe another color assignment method can help."
             super().__init__(default_message)
+
+    @staticmethod
+    def apply_assignment(assignment: Dict[Hardware.SystemPageColor, Set[MemoryConsumer]]):
+        for color, memory_consumers in assignment.items():
+            for memory_consumer in memory_consumers:
+                # logging.debug("Add color: " + str(color))
+                memory_consumer.add_color(color)
 
     @staticmethod
     def reset_colors(all_memory_consumers: Dict[str, MemoryConsumer]):
@@ -572,309 +702,57 @@ class ColorAssigner:
             memory_consumer.reset_colors()
 
     @staticmethod
-    def get_assignment_by_naive(hardware: Hardware, all_memory_consumers: Dict[str, MemoryConsumer]) -> \
-            Dict[Hardware.SystemPageColor, Set[MemoryConsumer]]:
+    @abstractmethod
+    def get_assignment():
+        pass
 
-        assignment = {system_page_color: set() for system_page_color in hardware.get_all_system_page_colors()}
 
-        num_assignable_colors = hardware.get_number_of_system_page_colors()
-        num_required_colors = len(all_memory_consumers)
-        all_system_page_colors = hardware.get_all_system_page_colors()
-
-        if num_required_colors > num_assignable_colors:
-            raise ColorAssigner.ColorExhaustion()
-        else:
-            for memory_consumer, color in zip(all_memory_consumers.values(), all_system_page_colors):
-                assignment[color].add(memory_consumer)
-
-        return assignment
-
+class IndexFunctionLibrary:
     @staticmethod
-    def assign_by_naive(hardware: Hardware, all_memory_consumers: Dict[str, MemoryConsumer]):
+    def get_rose_level_3_index_function(
+            L3_total_capacity, L3_cacheline_capacity, L3_associativity, address_bus_width)\
+            -> Cache.IndexFunction:
         """
-        Distributes - if possible - system page colors to all memory consumers by iterating through all system page
-        colors and distributing colors from all CPU cores equally. Raises an exception if it's not possible.
-
-        Raises:
-            ColorAssigner.ColorExhaustion: There are not enough colors to distribute.
+        L3 complex indexing function from Alexander Rose's internship report.
         """
-        assignment = ColorAssigner.get_assignment_by_naive(hardware, all_memory_consumers)
-        ColorAssigner._enforce_assignment(assignment)
 
-    # TODO: review / deprecated?
-    @staticmethod
-    def assign_color_by_interference_domains(hardware: Hardware, all_memory_consumers: Dict[str, MemoryConsumer],
-                                             interference_domains: List[Set[MemoryConsumer]]):
-        """Assign colors by interference domains.
+        NUMBER_OF_SLICES = 4
+        L3_number_of_sets = L3_total_capacity // (L3_associativity * L3_cacheline_capacity)
+        L3_number_of_sets_per_slice = L3_number_of_sets // NUMBER_OF_SLICES
 
-        This function does not respect pre-assigned colors of memory consumers. All memory consumer colors
-        must be undefined (None) at beginning of assignment.
+        # cache slice = cache block (complex indexing property of some Intel CPUs divides the cache into slices/blocks)
+        def address_to_cache_slice_number(addr: int) -> int:
+            # Binary representation of address
+            addr_bin = format(addr, '0' + str(address_bus_width) + 'b')
+            # Reverse so that Bit 0 is Array index 0 and convert to int for bit manipulation
+            bit = [int(i) for i in reversed(addr_bin)]
 
-        Args:
-            hardware:
-            all_memory_consumers:
-            interference_domains: An interference domain is a set of memory consumers whose memory regions are allowed
-                to interfere with each others in cache(s). Interference domains effectively lead to less color usage
-                since members of the same interference domain may share the same color. Non specified memory consumers
-                get exclusive colors.
-        Raises:
-            ColorAssigner.ColorExhaustion: There are not enough colors to distribute.
-        """
-        #       1. iterate through interference domains
-        #           1. assign same color to memory consumers in same interference domain
-        #              (if a memory consumer was colored before, its color gets overwritten)
-        #           2. remove colored memory consumers from all_memory_consumers
-        #           3. increase assigned_color_counter to later assure
-        #              it is small than the number of all assignable colors
-        #           4. If assigned_color_counter >= number of all assignable colors
-        #              return EXCEPTION (color exhaustion)
-        #       2. assign rest of colors incrementally to rest of all_memory_consumers and
-        #          assure that there is no color exhaustion
+            x_0 = bit[17] ^ bit[19] ^ bit[20] ^ bit[21] ^ bit[22] ^ bit[23] ^ bit[24] ^ bit[26] ^ bit[28] ^ bit[29] \
+                  ^ bit[31] ^ bit[33] ^ bit[34]
 
-        # get_colors is None or Empty for all memory consumers?
-        assert all((not memory_consumer.get_colors()) for memory_consumer in all_memory_consumers.values()),\
-            "The colors of all memory consumers must be undefined."
+            x_1 = bit[18] ^ bit[19] ^ bit[21] ^ bit[23] ^ bit[25] ^ bit[27] ^ bit[29] ^ bit[30] ^ bit[31] ^ bit[32] \
+                  ^ bit[34]
 
-        def get_next_assignable_color(table: Dict[Hardware.SystemPageColor, int]):
-            for color, counter in table.items():
-                if counter == 0:
-                    return color
+            ret = (x_0 * 2 ** 0) + (x_1 * 2 ** 1)
 
-            raise ColorAssigner.ColorExhaustion()
+            assert ret < NUMBER_OF_SLICES, "Slice number must be lower than the number of slices."
 
-        all_memory_consumers_values = list(all_memory_consumers.values())
-        color_usage_counter_table = {color: 0 for color in hardware.get_all_system_page_colors()}
+            return ret
 
-        for interference_domain in interference_domains:
-            assignable_color = get_next_assignable_color(color_usage_counter_table)
-            for memory_consumer in interference_domain:
-                #if memory_consumer.get_color() is not None:
-                if len(memory_consumer.get_colors()) == 1:
-                    color_usage_counter_table[memory_consumer.get_colors()[0]] -= 1
+        # Return cache set number within a block
+        def address_to_cache_set_number(addr: int) -> int:
+            from math import floor
+            return floor(addr / L3_cacheline_capacity) % L3_number_of_sets_per_slice
 
-                memory_consumer.add_color(assignable_color)
-                color_usage_counter_table[assignable_color] += 1
+        # Unique cache set identifier enumeration function maps:
+        # (Slice number, Cache set number) -> (Slice number)*(Maximum sets) + Cache set number, e. g.
+        # (0, 0) -> 0
+        # (0, 1) -> 1
+        # (0, L3_number_of_sets_per_slice - 1) = L3_number_of_sets_per_slice - 1
+        # (1, 0) -> L3_number_of_sets_per_slice
+        # (1, 1) -> L3_number_of_sets_per_slice + 1
+        # ...
+        # and finally the "last" cache set:
+        # (3, L3_number_of_sets_per_slice -1) -> 3*L3_number_of_sets_per_slice + L3_number_of_sets_per_slice - 1
 
-                all_memory_consumers_values.remove(memory_consumer)
-
-        # assign colors to rest of all_memory_consumers_values
-        for memory_consumer in all_memory_consumers_values:
-            assignable_color = get_next_assignable_color(color_usage_counter_table)
-            memory_consumer.add_color(assignable_color)
-            color_usage_counter_table[assignable_color] += 1
-
-    # TODO: review / deprecated?
-    @staticmethod
-    def get_assignment_by_security_labels(hardware: Hardware, all_executors: Dict[str, Executor]) \
-            -> Dict[MemoryConsumer, Set[Hardware.SystemPageColor]]:
-        return {}
-
-    # TODO: review / deprecated?
-    @staticmethod
-    def assign_color_by_security_labels(hardware: Hardware, all_executors: Dict[str, Executor]):
-        assignment = ColorAssigner.get_assignment_by_security_labels(hardware, all_executors)
-        ColorAssigner._enforce_assignment(assignment)
-
-    @staticmethod
-    def get_assignment_by_cache_isolation_domains(
-            hardware: Hardware,
-            all_memory_consumers: Dict[str, MemoryConsumer],
-            cache_isolation_domains: List[Set[MemoryConsumer]],
-            executor_cpu_constraints: Dict[Executor, Set[Hardware.CPU]] = None,
-            cpu_access_constraints: Dict[Hardware.CPU, Set[Executor]] = None
-    ) -> Dict[Hardware.SystemPageColor, Set[MemoryConsumer]]:
-        # Check if all memory consumers are only assigned to one cache_isolation_domain
-        # and initialize count value to zero
-        #count_membership_of_mc: Dict[MemoryConsumer, int] = dict.fromkeys(all_memory_consumers.values(), 0)
-        count_membership_of_mc = {memory_consumer: 0 for memory_consumer in all_memory_consumers.values()}
-        for isolation_domain in cache_isolation_domains:
-            for memory_consumer in isolation_domain:
-                if memory_consumer in count_membership_of_mc.keys():
-                    count_membership_of_mc[memory_consumer] += 1
-
-        # logging.debug("count_membersip_of_mc" + str(count_membership_of_mc.items()))
-        assert 0 not in count_membership_of_mc.values(), "All memory consumers of the system must be assigned at least " \
-                                                         "to one cache isolation domain. #ASSMS-CACHE-ISOLATION-0"
-        assert all(count == 1 for count in count_membership_of_mc.values()), "A memory consumer can only be member of" \
-                                                                             " only one cache isolation domain. " \
-                                                                             "#ASSMS-CACHE-ISOLATION-1"
-        assert cpu_access_constraints is None, "CPU-Access-Constraints are currently unimplemented/not needed. " \
-                                               "#ASSMS-CACHE-ISOLATION-7"
-
-        # Algorithm idea:
-        # Iterate through partitions and assign a pool of reservable colors to each cache isolation domain.
-        #   We assign a pool of colors and not one color, because there can be several executors within the same
-        #   cache isolation domain but which are not running on the same CPU core.
-        #   So there is no single reservable color for {subject_X, subject_Y} when they're are running on different
-        #   CPU cores.
-        # After each iteration steps, the cache isolation domain members add all possible reservable colors to their own
-        # colors.
-        #   Possible means: System Page Colors' CPU part is CPU the memory consumer is accessed by (read/write/execute).
-        # We repeat the iteration through cache isolation domains until there is no color to assign left.
-
-        def assign_colors_to_cache_isolation_domain(cache_isolation_domain,
-                                                    assignment: Dict[Hardware.SystemPageColor, Set[MemoryConsumer]]):
-            """Assign colors to provided cache isolation domain"""
-            def get_next_assignable_colors(
-                    memory_consumer: MemoryConsumer,
-                    assignment: Dict[Hardware.SystemPageColor, Set[MemoryConsumer]])\
-                    -> List[Hardware.SystemPageColor]:
-                """Returns the next assignable colors of a memory consumer without reserving them."""
-                """
-                Ideas:
-                    - If MemoryConsumer is only on running one CPU cores (e. g. CPU_X), then just get the next free
-                      (CPU_X, Y) page color.
-                    - If MemoryConsumer is running on several CPU cores (e. g. CPU_X and CPU_Y), then get next free
-                      colors (CPU_X, A) and (CPU_Y, B), where A == B.
-                      Background:
-                        Assuming MemoryConsumer is running on two CPU cores on one memory page. Then we must assume
-                        that the MemoryConsumer can run with both CPU core on this memory page and occupying
-                        two page colors for the same memory page.
-                    - If a MemoryConsumer is a Channel then we could also need two page colors, if source and target
-                      subjects are running on different CPU cores; if not, we only need one page color.
-                """
-
-                # get the CPU core(s) of the memory consumer and get next assignable SystemPageColors
-                # with matching CPU core(s), which have all the same page_color, e. g.
-                # (CPU_0, x), (CPU_1, y) when (CPU cores is CPU_0 and CPU_1) and where x=y.
-                executors = memory_consumer.get_executors()
-                cpus = []
-                for executor in executors:
-                    cpus.extend(executor_cpu_constraints[executor]) # TODO: bad style
-
-                for cpu_page_color in range(hardware.get_number_of_cpu_page_colors()):
-                    if all(len(assignment[Hardware.SystemPageColor(cpu, cpu_page_color)]) == 0 for cpu in cpus):
-                        return [Hardware.SystemPageColor(cpu, cpu_page_color) for cpu in cpus]
-
-                raise ColorAssigner.ColorExhaustion()
-
-            def assign_colors(
-                    cache_isolation_domain,
-                    cache_isolation_domain_colors: List[Hardware.SystemPageColor],
-                    assignment: Dict[Hardware.SystemPageColor, Set[MemoryConsumer]]
-                    # color_table: Dict[Hardware.SystemPageColor, int]
-            ):
-                """Assign SystemPageColors to the MemoryConsumers in the cache isolation domain - if possible  -
-                and mark the system page color as used in the color table."""
-                for color in cache_isolation_domain_colors:
-                    for memory_consumer in cache_isolation_domain:
-                        executors = memory_consumer.get_executors() # TODO: bad style
-                        memory_consumer_cpus = []
-                        for executor in executors:
-                            memory_consumer_cpus.extend(executor_cpu_constraints[executor])
-                        # memory_consumer_cpus = [executor_cpu_constraints[executor] for executor in
-                        #                        memory_consumer.get_executors()]
-                        if color.get_cpu() in memory_consumer_cpus:
-                            assignment[color].add(memory_consumer)
-                            # memory_consumer.add_color(color)
-                            # color_table[color] += 1
-
-            cache_isolation_domain_colors: List[Hardware.SystemPageColor] = []
-
-            for cache_isolation_member in cache_isolation_domain:
-                colors = get_next_assignable_colors(cache_isolation_member, assignment)
-                cache_isolation_domain_colors.extend(colors)
-
-            assign_colors(cache_isolation_domain, cache_isolation_domain_colors, assignment)
-
-            # colors assigned implies len(cache_isolation_domain_colors) > 0
-            # logging.debug("cache_isolation_domain_colors:" + str(cache_isolation_domain_colors))
-            return len(cache_isolation_domain_colors) > 0
-
-        assignment = {system_page_color: set() for system_page_color in hardware.get_all_system_page_colors()}
-        color_to_assign_available = True
-        # counts how often a SystemPageColor is used
-        # color_table = dict.fromkeys(hardware.get_all_system_page_colors(), 0)
-
-        # while color_to_assign_available:
-        #     color_to_assign_available = False
-        #     for ci_domain in cache_isolation_domains:
-        #         color_to_assign_available |= assign_colors_to_cache_isolation_domain(ci_domain, assignment)
-
-        # only one iteration, TODO: more iteration until no color to assign left
-        for ci_domain in cache_isolation_domains:
-            color_to_assign_available |= assign_colors_to_cache_isolation_domain(ci_domain, assignment)
-
-        return assignment
-
-    @staticmethod
-    def assign_by_cache_isolation_domains(
-            hardware:                   Hardware,
-            all_memory_consumers:       Dict[str, MemoryConsumer],
-            cache_isolation_domains:    List[Set[MemoryConsumer]],
-            executor_cpu_constraints:   Dict[Executor, Set[Hardware.CPU]] = None,
-            cpu_access_constraints:     Dict[Hardware.CPU, Set[Executor]] = None
-    ):
-        """Assign colors by cache isolation domains method.
-
-        A cache isolation domain contains a set of memory consumers and separates them (in the sense of cache
-        non-interference) from other memory consumers of the system. That means that memory consumers of the same
-        cache isolation domain reserve a set of colors which can be used by them and cannot be used by memory consumers
-        which are not member of the same cache isolation domain.
-
-        The set of colors assigned to an Executor can be further constrained by Executor-CPU-constraints.
-        Executor-CPU-constraints constraints the set of reservable colors of an Executors to the set of colors of
-        certain specified CPUs.
-        E. g.: On a 4-core systems, a subject X can be constrained to only reserve colors of
-        the kind (CPU_0, $num_colors), (CPU_3, $num_colors), which implicitly disallows all colors of the classes
-        (CPU_1, $num_colors) and (CPU_2, $num_colors), such as (CPU_1, 0), (CPU_1, 1), (CPU_2, 0), (CPU_2, 1), ...
-        An Executor-CPU-constraint does not mean that an executor gets a CPU core exclusively. Thus other Executors may
-        also reserve colors which are using the same CPU core.
-        Executor-CPU-constraints can especially be used for finding valid colors assignments of existing scheduling
-        plans which have already assigned CPU cores to executors.
-        The current implementation requires that all Executors of the system are assigned to at least on CPU core.
-        #ASSMS-CACHE-ISOLATION-6
-
-        CPU-Access-Constraints are currently unimplemented/not needed.
-        #Besides Executor-CPU-constraints the assignment of colors can also be further constrained by
-        #CPU-Access-Constraints. A CPU-Access-Constraint specifies a set of Executors which exclusively own a CPU core
-        #and thus only the specified Executors may reserve a System Page Color of the CPU.
-        #E. g.: if "CPU_0 -> {subject_X, subject_Y}" is specified as one CPU-Access-Constraint, then only subject_X and
-        #subject_Y (and no other Executors) are allowed to reserve System Page Colors of the form
-        #(CPU_0, 0), (CPU_0, 1), ... . Other CPU-Access-Constraints may additionally expand the space of reservable
-        #System Page Colors of subject_X and/or subject_Y independently (e. g. "CPU_1" -> {subject_X},
-        #"CPU_2" -> {subject_Y, subject_Z}).
-        #CPU-Access-Constraints can especially be used to enforce stricter isolation between Executors to prevent
-        #further shared microarchitectural state besides caches.
-
-        Assumptions and preconditions:
-            - All memory consumers of the system must be assigned at least to one cache isolation domain.
-              #ASSMS-CACHE-ISOLATION-0
-            - A memory consumer can only be member of one cache isolation domain. #ASSMS-CACHE-ISOLATION-1
-            # For simplicity commented out for now:
-            #- If the cache isolation domain of a memory consumer is not explicitly specified by
-            #  cache_isolation_domains,
-            #  it is implicitly assumed that the memory consumer gets its own exclusive cache isolation domain.
-            #  #ASSMS-CACHE-ISOLATION-2
-            - The specification of the constraints could have inconsistencies such as "subject_X -> CPU_0" as an
-              Executor-CPU-Constraint and "CPU_0 -> {subject_A, subject_B}" as a CPU-Access-Constraint.
-              There must be no inconsistencies between Executor-CPU-Constraints and CPU-Access-Constraints.
-              #ASSMS-CACHE-ISOLATION-3
-            - An Executor contained in any constraint must be an executor of the hardware system provided.
-              #ASSMS-CACHE-ISOLATION-4
-            - A CPU core contained in any constraint must be a CPU core of the hardware system provided.
-              #ASSMS-CACHE-ISOLATION-5
-            - The current implementation requires that all Executors of the system are assigned to at least on CPU core.
-              #ASSMS-CACHE-ISOLATION-6
-            - CPU-Access-Constraints are currently unimplemented/not needed. #ASSMS-CACHE-ISOLATION-7
-
-        Args:
-            hardware: Hardware system.
-            all_memory_consumers: All memory consumers of the hardware system.
-            cache_isolation_domains: Cache isolation domains for which a valid page coloring is requested.
-            executor_cpu_constraints: Executor-CPU-Constraints which must enforced on top of the cache isolation
-                domains. See function documentation for details.
-            cpu_access_constraints: (Currently not implemented/not needed) CPU-Access-Constraints which must enforced on
-                top of the cache isolation domains. See function documentation for details.
-        """
-        assignment = ColorAssigner.get_assignment_by_cache_isolation_domains(
-            hardware, all_memory_consumers, cache_isolation_domains, executor_cpu_constraints, cpu_access_constraints
-        )
-        ColorAssigner._enforce_assignment(assignment)
-
-    @staticmethod
-    def _enforce_assignment(assignment: Dict[Hardware.SystemPageColor, Set[MemoryConsumer]]):
-        for color, memory_consumers in assignment.items():
-            for memory_consumer in memory_consumers:
-                # logging.debug("Add color: " + str(color))
-                memory_consumer.add_color(color)
+        return lambda addr: address_to_cache_slice_number(addr) * L3_number_of_sets + address_to_cache_set_number(addr)

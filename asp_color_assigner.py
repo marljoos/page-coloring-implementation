@@ -1,22 +1,19 @@
 from typing import Dict, Set
 
-from clorm import Predicate, ConstantField, IntegerField, ph1_, FactBase, RawField, ComplexTerm,\
-            simple_predicate
-from clorm.clingo import Control, Function, Symbol, String
+from clorm import Predicate, ConstantField, IntegerField, FactBase, RawField
+from clorm.clingo import Control, Function, Symbol
 import itertools
 
 import clorm.clingo
-# TODO: Circular dependency
-from page_coloring_model import ClingoPrinter, System
 import page_coloring_model as PageColoringModel
+from page_coloring_model_clingo_printer import PageColoringModelClingoPrinter
+
+import logging
 
 
 class Memory_consumer(Predicate):
     name = RawField
 
-
-#CMemory_consumer_alt = simple_predicate("cmemory_consumer", 1)
-# Success
 
 class Executor(Predicate):
     name = ConstantField
@@ -99,22 +96,80 @@ class Mapped(Predicate):
     color = RawField
 
 
-class ASPColorAssigner:
+class ASPColorAssigner(PageColoringModel.ColorAssigner):
     @staticmethod
-    def get_assignment_by_cache_isolation_domain_method(
+    def get_assignment(
             system: PageColoringModel.System,
             cache_isolation_domains,
             executor_cpu_constraints
-    ) -> Dict[PageColoringModel.Hardware.SystemPageColorNew, Set[PageColoringModel.MemoryConsumer]]:
+    ) -> Dict[PageColoringModel.Hardware.SystemPageColor, Set[PageColoringModel.MemoryConsumer]]:
+        """Assign colors by cache isolation domains method.
 
-        #assignment: Dict[PageColoringModel.Hardware.SystemPageColorNew, Set[PageColoringModel.MemoryConsumer]] = {}
+        A cache isolation domain contains a set of memory consumers and separates them (in the sense of cache
+        non-interference) from other memory consumers of the system. Therefore memory consumers of the same
+        cache isolation domain reserve a set of colors which can be used by them and cannot be used by memory consumers
+        which are not member of the same cache isolation domain.
+
+        The set of colors assigned to an Executor can be further constrained by Executor-CPU-constraints.
+        Executor-CPU-constraints constraints the set of reservable colors of an Executors to the set of colors of
+        certain specified CPUs.
+        E. g.: On a 4-core systems, a subject X can be constrained to only reserve colors of
+        the kind (CPU_0, $num_colors), (CPU_3, $num_colors), which implicitly disallows all colors of the classes
+        (CPU_1, $num_colors) and (CPU_2, $num_colors), such as (CPU_1, 0), (CPU_1, 1), (CPU_2, 0), (CPU_2, 1), ...
+        An Executor-CPU-constraint does not mean that an executor gets a CPU core exclusively. Thus other Executors may
+        also reserve colors which are using the same CPU core.
+        Executor-CPU-constraints can especially be used for finding valid colors assignments of existing scheduling
+        plans which have already assigned CPU cores to executors.
+        The current implementation requires that all Executors of the system are assigned to at least on CPU core.
+        #ASSMS-CACHE-ISOLATION-6
+
+        CPU-Access-Constraints are currently unimplemented/not needed.
+        #Besides Executor-CPU-constraints the assignment of colors can also be further constrained by
+        #CPU-Access-Constraints. A CPU-Access-Constraint specifies a set of Executors which exclusively own a CPU core
+        #and thus only the specified Executors may reserve a System Page Color of the CPU.
+        #E. g.: if "CPU_0 -> {subject_X, subject_Y}" is specified as one CPU-Access-Constraint, then only subject_X and
+        #subject_Y (and no other Executors) are allowed to reserve System Page Colors of the form
+        #(CPU_0, 0), (CPU_0, 1), ... . Other CPU-Access-Constraints may additionally expand the space of reservable
+        #System Page Colors of subject_X and/or subject_Y independently (e. g. "CPU_1" -> {subject_X},
+        #"CPU_2" -> {subject_Y, subject_Z}).
+        #CPU-Access-Constraints can especially be used to enforce stricter isolation between Executors to prevent
+        #further shared microarchitectural state besides caches.
+
+        Assumptions and preconditions:
+            - All memory consumers of the system must be assigned at least to one cache isolation domain.
+              #ASSMS-CACHE-ISOLATION-0
+            - A memory consumer can only be member of one cache isolation domain. #ASSMS-CACHE-ISOLATION-1
+            # For simplicity commented out for now:
+            #- If the cache isolation domain of a memory consumer is not explicitly specified by
+            #  cache_isolation_domains,
+            #  it is implicitly assumed that the memory consumer gets its own exclusive cache isolation domain.
+            #  #ASSMS-CACHE-ISOLATION-2
+            - The specification of the constraints could have inconsistencies such as "subject_X -> CPU_0" as an
+              Executor-CPU-Constraint and "CPU_0 -> {subject_A, subject_B}" as a CPU-Access-Constraint.
+              There must be no inconsistencies between Executor-CPU-Constraints and CPU-Access-Constraints.
+              #ASSMS-CACHE-ISOLATION-3
+            - An Executor contained in any constraint must be an executor of the hardware system provided.
+              #ASSMS-CACHE-ISOLATION-4
+            - A CPU core contained in any constraint must be a CPU core of the hardware system provided.
+              #ASSMS-CACHE-ISOLATION-5
+            - The current implementation requires that all Executors of the system are assigned to at least on CPU core.
+              #ASSMS-CACHE-ISOLATION-6
+            - CPU-Access-Constraints are currently unimplemented/not needed. #ASSMS-CACHE-ISOLATION-7
+
+        Args:
+            system: The system (consists of hardware and memory consumers).
+            cache_isolation_domains: Cache isolation domains for which a valid page coloring is requested.
+            executor_cpu_constraints: Executor-CPU-Constraints which must enforced on top of the cache isolation
+                domains. See function documentation for details.
+            cpu_access_constraints: (Currently not implemented/not needed) CPU-Access-Constraints which must enforced on
+                top of the cache isolation domains. See function documentation for details.
+        """
+
         assignment = {system_page_color: set() for system_page_color in system.get_system_page_colors()}
 
-        # for spc in assignment.keys():
-        #     print("test:" + str(spc))
-
         ASP_PROGRAM_PATH = "asp_programs/page-coloring.pl"
-        cname = ClingoPrinter.convert_to_clingo_name
+
+        cname = PageColoringModelClingoPrinter.convert_to_clingo_name
 
         all_memory_consumers = system.get_all_memory_consumers()
 
@@ -157,14 +212,14 @@ class ASPColorAssigner:
         kernels = [Kernel(name=n) for n in all_kernel_names]
         subjects = [Subject(name=n) for n in all_subject_names]
         channels = [Channel(source=src, target=trgt) for (src, trgt) in all_channel_names]
-        cpus = [Cpu(cpu_id=int(cpu_core.get_name_without_prefix())) for cpu_core in cpu_cores]
+        cpus = [Cpu(cpu_id=int(cpu_core.get_id())) for cpu_core in cpu_cores]
 
         ex_cpus = []
         for executor, cpu_list in executor_cpu_constraints.items():
             for cpu in cpu_list:
                 executor_name = cname(executor.get_name())
                 ex_cpus.append(
-                    Ex_cpu(name=executor_name, cpu_id=int(cpu.get_name_without_prefix()))
+                    Ex_cpu(name=executor_name, cpu_id=int(cpu.get_id()))
                 )
 
         # TODO: Everything CacheColors related is inflexible. To be refactored.
@@ -178,49 +233,30 @@ class ASPColorAssigner:
         l3_cache_ids = list(range(1, num_l3_colors + 1))
 
         l1_colors = [
-            L1_color(cache_id=int(cache_id), cpu_id=int(cpu_core.get_name_without_prefix()))
+            L1_color(cache_id=int(cache_id), cpu_id=int(cpu_core.get_id()))
             for (cache_id, cpu_core)
             in itertools.product(l1_cache_ids, cpu_cores)
         ]
 
         l2_colors = [
-            L2_color(cache_id=int(cache_id), cpu_id=int(cpu_core.get_name_without_prefix()))
+            L2_color(cache_id=int(cache_id), cpu_id=int(cpu_core.get_id()))
             for (cache_id, cpu_core)
             in itertools.product(l2_cache_ids, cpu_cores)
         ]
 
         l3_colors = [L3_color(cache_id=int(cache_id)) for cache_id in l3_cache_ids]
 
-        # page_colors = []
-        # for page_color in system.get_page_colors():
-        #     l1 = page_color.get_cache_colors()[0]
-        #     l2 = page_color.get_cache_colors()[1]
-        #     l3 = page_color.get_cache_colors()[2]
-        #     l1_color = l1.get_name_without_prefix()
-        #     l2_color = l2.get_name_without_prefix()
-        #     l3_color = l3.get_name_without_prefix()
-        #     for cpu in cpu_cores:
-        #         cpu_id = int(cpu.get_name_without_prefix())
-        #
-        #         page_colors.append(
-        #             Page_color(
-        #                 l1_color=L1_color(cache_id=int(l1_color), cpu_id=cpu_id),
-        #                 l2_color=L2_color(cache_id=int(l2_color), cpu_id=cpu_id),
-        #                 l3_color=L3_color(cache_id=int(l3_color))
-        #             )
-        #         )
-
         predicate_to_system_page_color = {}
         page_colors = []
         for system_page_color in system.get_system_page_colors():
-            cpu_id = int(system_page_color.get_cpu().get_name_without_prefix())
+            cpu_id = int(system_page_color.get_cpu().get_id())
             page_color = system_page_color.get_page_color()
             l1 = page_color.get_cache_colors()[0]
             l2 = page_color.get_cache_colors()[1]
             l3 = page_color.get_cache_colors()[2]
-            l1_color = l1.get_name_without_prefix()
-            l2_color = l2.get_name_without_prefix()
-            l3_color = l3.get_name_without_prefix()
+            l1_color = l1.get_id()
+            l2_color = l2.get_id()
+            l3_color = l3.get_id()
 
             predicate = Page_color(
                     l1_color=L1_color(cache_id=int(l1_color), cpu_id=cpu_id),
@@ -239,28 +275,24 @@ class ASPColorAssigner:
             for member in cache_isolation_domain:
                 if not isinstance(member, PageColoringModel.Channel):
                     memory_consumer = cname(member.get_name())
+
                     mc_cache_isolations.append(
-                        # CMc_cache_isolation(member=CMemory_consumer(name=Function(memory_consumer)), cid_id=cid_id)
                         Mc_cache_isolation(member=clorm.clingo.Function(memory_consumer), cid_id=cid_id)
                     )
                 elif isinstance(member, PageColoringModel.Channel):
                     source_name = cname(member.get_source().get_name())
                     target_name = cname(member.get_target().get_name())
-                    mc_name = "c(" + source_name + "," + target_name + ")"
-                    # CMemory_consumer_alt
+
                     mc_cache_isolations.append(
                         Mc_cache_isolation(
-                            # member=CMemory_consumer(name=Function("c", [Function(source_name), Function(target_name)])),
-                            # cid_id=int(cid_id)
                             member=Function("c", [Function(source_name), Function(target_name)]),
                             cid_id=int(cid_id)
                         )
-                        # CMc_cache_isolation(member=C(source=source_name, target=target_name), cid_id=cid_id)
                     )
                 else:
                     assert False, "Unexpected condition."
 
-        #######################
+        ##
 
         ctrl = Control(
             unifier=[
@@ -282,6 +314,7 @@ class ASPColorAssigner:
 
         instance = FactBase(fact_base)
 
+        # Show fact base.
         # print(instance.asp_str())
 
         ctrl.add_facts(instance)
@@ -294,35 +327,26 @@ class ASPColorAssigner:
 
         ctrl.solve(on_model=on_model)
         if not solution:
-            raise ValueError("No solution found")
+            raise ASPColorAssigner.ColorAssignmentException(
+                "No ASP solution found. Error can be anything. ASP unsatisfiability is hard to debug."
+            )
 
         query1 = solution.select(L1_count)
         query2 = solution.select(L2_count)
         query3 = solution.select(L3_count)
         query4 = solution.select(Map_pc).order_by(Map_pc.memory_consumer)
-        query5 = solution.select(Memory_consumer)
-        query6 = solution.select(Channel)
-        query7 = solution.select(Executor)
 
         l1_counts = query1.get()
         l2_counts = query2.get()
         l3_counts = query3.get()
         mapped_page_colors = query4.get()
-        memory_consumers = query5.get()
-        asp_channels = query6.get()
-        asp_executors = query7.get()
 
-        print("Mapped L1 colors: " + str(l1_counts[0].num))
-        print("Mapped L2 colors: " + str(l2_counts[0].num))
-        print("Mapped L3 colors: " + str(l3_counts[0].num))
+        logging.info("Mapped L1 colors: " + str(l1_counts[0].num))
+        logging.info("Mapped L2 colors: " + str(l2_counts[0].num))
+        logging.info("Mapped L3 colors: " + str(l3_counts[0].num))
 
         for mapping in mapped_page_colors:
-            #print(str(mapping.memory_consumer) + " -> " + str(mapping.page_color))
-            #print("Test:" + str(type(mapping.memory_consumer)) + str(type(mapping.page_color)))
-            if isinstance(mapping.memory_consumer, Memory_consumer):
-                assert False, "Unexpected."
-                # mapping.memory_consumer = predicate_to_memory_consumer[mapping.memory_consumer]
-            elif isinstance(mapping.memory_consumer, Symbol):
+            if isinstance(mapping.memory_consumer, Symbol):
                 if mapping.memory_consumer.name == "c":  # Channel
                     assert len(mapping.memory_consumer.arguments) == 2
                     src = str(mapping.memory_consumer.arguments[0])
@@ -333,24 +357,11 @@ class ASPColorAssigner:
                     memory_consumer = \
                         predicate_to_memory_consumer[Memory_consumer(name=mapping.memory_consumer.name)]
                 else:
-                    # print(str(mapping.memory_consumer.name))
                     assert False, "Unexpected."
             else:
                 assert False, "Unexpected."
 
-            #print(str(type(mapping.page_color)))
             system_page_color = predicate_to_system_page_color[mapping.page_color]
-            #print(str(system_page_color))
             assignment[system_page_color].add(memory_consumer)
-
-        # for mc in memory_consumers:
-        #     print(str(mc))
-        #     print(type(mc))
-        #
-        # for c in asp_channels:
-        #     print(str(c))
-        #
-        # for e in asp_executors:
-        #     print(str(e))
 
         return assignment
