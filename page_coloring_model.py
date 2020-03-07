@@ -572,7 +572,7 @@ class MemoryConsumer:
     def add_color(self, color: Hardware.SystemPageColor):
         self._colors.append(color)
 
-    def get_colors(self):
+    def get_colors(self) -> List[Hardware.SystemPageColor]:
         return self._colors
 
     def add_executor(self, executor: Executor):
