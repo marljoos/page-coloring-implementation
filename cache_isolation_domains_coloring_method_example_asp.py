@@ -222,7 +222,11 @@ def main():
     logging.info("Unassigned system page colors:")
     PageColoringModelPrettyPrinter.print_unassigned_system_page_colors(system, assignment)
 
+    logging.info("Assigning pages.")
+    PageAssigner.assign_pages_simple(system)
+    logging.info("Assigning pages. Finished.")
     # TODO: Print MemoryConsumer to address space mapping
+    PageColoringModelPrettyPrinter.print_page_assignment(system)
 
     # logging.info("Clingo output:")
     # ClingoPrinter.print_executors(executors)
