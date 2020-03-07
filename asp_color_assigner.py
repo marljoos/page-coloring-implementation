@@ -11,7 +11,7 @@ from page_coloring_model_clingo_printer import PageColoringModelClingoPrinter
 import logging
 
 
-class Memory_consumer(Predicate):
+class Memory_region(Predicate):
     name = RawField
 
 
@@ -65,13 +65,13 @@ class Cache_isolation_domain(Predicate):
     cid_id = IntegerField
 
 
-class Mc_cache_isolation(Predicate):
+class Mr_cache_isolation(Predicate):
     member = RawField
     cid_id = IntegerField
 
 
 class Map_pc(Predicate):
-    memory_consumer = RawField
+    memory_region = RawField
     page_color = Page_color.Field
 
 
@@ -87,8 +87,8 @@ class L1_count(Predicate):
     num = IntegerField
 
 
-class Mc_cpu(Predicate):
-    memory_consumer = RawField
+class Mr_cpu(Predicate):
+    memory_region = RawField
     cpu_id = IntegerField
 
 
@@ -102,12 +102,12 @@ class ASPColorAssigner(PageColoringModel.ColorAssigner):
             system: PageColoringModel.System,
             cache_isolation_domains,
             executor_cpu_constraints
-    ) -> Dict[PageColoringModel.Hardware.SystemPageColor, Set[PageColoringModel.MemoryConsumer]]:
+    ) -> Dict[PageColoringModel.Hardware.SystemPageColor, Set[PageColoringModel.MemoryRegion]]:
         """Assign colors by cache isolation domains method.
 
-        A cache isolation domain contains a set of memory consumers and separates them (in the sense of cache
-        non-interference) from other memory consumers of the system. Therefore memory consumers of the same
-        cache isolation domain reserve a set of colors which can be used by them and cannot be used by memory consumers
+        A cache isolation domain contains a set of memory regions and separates them (in the sense of cache
+        non-interference) from other memory regions of the system. Therefore memory regions of the same
+        cache isolation domain reserve a set of colors which can be used by them and cannot be used by memory regions
         which are not member of the same cache isolation domain.
 
         The set of colors assigned to an Executor can be further constrained by Executor-CPU-constraints.
@@ -136,13 +136,13 @@ class ASPColorAssigner(PageColoringModel.ColorAssigner):
         #further shared microarchitectural state besides caches.
 
         Assumptions and preconditions:
-            - All memory consumers of the system must be assigned at least to one cache isolation domain.
+            - All memory regions of the system must be assigned at least to one cache isolation domain.
               #ASSMS-CACHE-ISOLATION-0
-            - A memory consumer can only be member of one cache isolation domain. #ASSMS-CACHE-ISOLATION-1
+            - A memory region can only be member of one cache isolation domain. #ASSMS-CACHE-ISOLATION-1
             # For simplicity commented out for now:
-            #- If the cache isolation domain of a memory consumer is not explicitly specified by
+            #- If the cache isolation domain of a memory region is not explicitly specified by
             #  cache_isolation_domains,
-            #  it is implicitly assumed that the memory consumer gets its own exclusive cache isolation domain.
+            #  it is implicitly assumed that the memory region gets its own exclusive cache isolation domain.
             #  #ASSMS-CACHE-ISOLATION-2
             - The specification of the constraints could have inconsistencies such as "subject_X -> CPU_0" as an
               Executor-CPU-Constraint and "CPU_0 -> {subject_A, subject_B}" as a CPU-Access-Constraint.
@@ -157,7 +157,7 @@ class ASPColorAssigner(PageColoringModel.ColorAssigner):
             - CPU-Access-Constraints are currently unimplemented/not needed. #ASSMS-CACHE-ISOLATION-7
 
         Args:
-            system: The system (consists of hardware and memory consumers).
+            system: The system (consists of hardware and memory regions).
             cache_isolation_domains: Cache isolation domains for which a valid page coloring is requested.
             executor_cpu_constraints: Executor-CPU-Constraints which must enforced on top of the cache isolation
                 domains. See function documentation for details.
@@ -171,47 +171,47 @@ class ASPColorAssigner(PageColoringModel.ColorAssigner):
 
         cname = PageColoringModelClingoPrinter.convert_to_clingo_name
 
-        all_memory_consumers = system.get_all_memory_consumers()
+        memory_regions = system.get_memory_regions()
 
-        # Create mapping from clingo name to MemoryConsumer name
-        predicate_to_memory_consumer = {}
-        for memory_consumer in all_memory_consumers:
-            if isinstance(memory_consumer, PageColoringModel.Kernel):
-                predicate_to_memory_consumer[Memory_consumer(name=cname(memory_consumer.get_name()))] = memory_consumer
-            elif isinstance(memory_consumer, PageColoringModel.Subject):
-                predicate_to_memory_consumer[Memory_consumer(name=cname(memory_consumer.get_name()))] = memory_consumer
-            elif isinstance(memory_consumer, (PageColoringModel.Channel)):
-                src = cname(memory_consumer.get_source().get_name())
-                trgt = cname(memory_consumer.get_target().get_name())
-                predicate_to_memory_consumer[Channel(source=src, target=trgt)] = memory_consumer
+        # Create mapping from clingo name to MemoryRegion name
+        predicate_to_memory_region = {}
+        for memory_region in memory_regions:
+            if isinstance(memory_region, PageColoringModel.Kernel):
+                predicate_to_memory_region[Memory_region(name=cname(memory_region.get_name()))] = memory_region
+            elif isinstance(memory_region, PageColoringModel.Subject):
+                predicate_to_memory_region[Memory_region(name=cname(memory_region.get_name()))] = memory_region
+            elif isinstance(memory_region, (PageColoringModel.Channel)):
+                src = cname(memory_region.get_source().get_name())
+                trgt = cname(memory_region.get_target().get_name())
+                predicate_to_memory_region[Channel(source=src, target=trgt)] = memory_region
             else:
-                assert False, "Unexpected condition. Unknown MemoryConsumer class."
+                assert False, "Unexpected condition. Unknown MemoryRegion class."
 
-        all_kernel_names = [
-            cname(memory_consumer.get_name())
-            for memory_consumer in all_memory_consumers
-            if isinstance(memory_consumer, PageColoringModel.Kernel)
+        kernel_names = [
+            cname(memory_region.get_name())
+            for memory_region in memory_regions
+            if isinstance(memory_region, PageColoringModel.Kernel)
         ]
 
-        all_subject_names = [
-            cname(memory_consumer.get_name())
-            for memory_consumer in all_memory_consumers
-            if isinstance(memory_consumer, PageColoringModel.Subject)
+        subject_names = [
+            cname(memory_region.get_name())
+            for memory_region in memory_regions
+            if isinstance(memory_region, PageColoringModel.Subject)
         ]
 
         # channel name does mean (source_name, target_name) here
-        all_channel_names = [
-            (cname(memory_consumer.get_source().get_name()),
-             cname(memory_consumer.get_target().get_name()))
-            for memory_consumer in all_memory_consumers
-            if isinstance(memory_consumer, PageColoringModel.Channel)
+        channel_names = [
+            (cname(memory_region.get_source().get_name()),
+             cname(memory_region.get_target().get_name()))
+            for memory_region in memory_regions
+            if isinstance(memory_region, PageColoringModel.Channel)
         ]
 
         cpu_cores = system.get_hardware().get_cpu_cores()
 
-        kernels = [Kernel(name=n) for n in all_kernel_names]
-        subjects = [Subject(name=n) for n in all_subject_names]
-        channels = [Channel(source=src, target=trgt) for (src, trgt) in all_channel_names]
+        kernels = [Kernel(name=n) for n in kernel_names]
+        subjects = [Subject(name=n) for n in subject_names]
+        channels = [Channel(source=src, target=trgt) for (src, trgt) in channel_names]
         cpus = [Cpu(cpu_id=int(cpu_core.get_id())) for cpu_core in cpu_cores]
 
         ex_cpus = []
@@ -270,21 +270,21 @@ class ASPColorAssigner(PageColoringModel.ColorAssigner):
             Cache_isolation_domain(cid_id=i) for i in range(1, len(cache_isolation_domains) + 1)
         ]
 
-        mc_cache_isolations = []
+        mr_cache_isolations = []
         for cid_id, cache_isolation_domain in enumerate(cache_isolation_domains, start=1):
             for member in cache_isolation_domain:
                 if not isinstance(member, PageColoringModel.Channel):
-                    memory_consumer = cname(member.get_name())
+                    memory_region = cname(member.get_name())
 
-                    mc_cache_isolations.append(
-                        Mc_cache_isolation(member=clorm.clingo.Function(memory_consumer), cid_id=cid_id)
+                    mr_cache_isolations.append(
+                        Mr_cache_isolation(member=clorm.clingo.Function(memory_region), cid_id=cid_id)
                     )
                 elif isinstance(member, PageColoringModel.Channel):
                     source_name = cname(member.get_source().get_name())
                     target_name = cname(member.get_target().get_name())
 
-                    mc_cache_isolations.append(
-                        Mc_cache_isolation(
+                    mr_cache_isolations.append(
+                        Mr_cache_isolation(
                             member=Function("c", [Function(source_name), Function(target_name)]),
                             cid_id=int(cid_id)
                         )
@@ -296,21 +296,21 @@ class ASPColorAssigner(PageColoringModel.ColorAssigner):
 
         ctrl = Control(
             unifier=[
-                Memory_consumer, Executor,
+                Memory_region, Executor,
                 Kernel, Subject, Channel, Cpu, Ex_cpu,
                 L1_color, L2_color, L3_color, Page_color,
                 Cache_isolation_domain,
-                Mc_cache_isolation,
+                Mr_cache_isolation,
                 Map_pc,
                 L3_count, L2_count, L1_count,
-                Mc_cpu, Mapped  # , C
+                Mr_cpu, Mapped  # , C
             ])
         ctrl.load(ASP_PROGRAM_PATH)
 
         fact_base = kernels + subjects + channels + cpus + ex_cpus + \
                     l1_colors + l2_colors + l3_colors + page_colors + \
                     clingo_cache_isolations_domains + \
-                    mc_cache_isolations
+                    mr_cache_isolations
 
         instance = FactBase(fact_base)
 
@@ -334,7 +334,7 @@ class ASPColorAssigner(PageColoringModel.ColorAssigner):
         query1 = solution.select(L1_count)
         query2 = solution.select(L2_count)
         query3 = solution.select(L3_count)
-        query4 = solution.select(Map_pc).order_by(Map_pc.memory_consumer)
+        query4 = solution.select(Map_pc).order_by(Map_pc.memory_region)
 
         l1_counts = query1.get()
         l2_counts = query2.get()
@@ -346,22 +346,22 @@ class ASPColorAssigner(PageColoringModel.ColorAssigner):
         logging.info("Mapped L3 colors: " + str(l3_counts[0].num))
 
         for mapping in mapped_page_colors:
-            if isinstance(mapping.memory_consumer, Symbol):
-                if mapping.memory_consumer.name == "c":  # Channel
-                    assert len(mapping.memory_consumer.arguments) == 2
-                    src = str(mapping.memory_consumer.arguments[0])
-                    trgt = str(mapping.memory_consumer.arguments[1])
-                    memory_consumer =\
-                        predicate_to_memory_consumer[Channel(source=src, target=trgt)]
-                elif len(mapping.memory_consumer.arguments) == 0:
-                    memory_consumer = \
-                        predicate_to_memory_consumer[Memory_consumer(name=mapping.memory_consumer.name)]
+            if isinstance(mapping.memory_region, Symbol):
+                if mapping.memory_region.name == "c":  # Channel
+                    assert len(mapping.memory_region.arguments) == 2
+                    src = str(mapping.memory_region.arguments[0])
+                    trgt = str(mapping.memory_region.arguments[1])
+                    memory_region =\
+                        predicate_to_memory_region[Channel(source=src, target=trgt)]
+                elif len(mapping.memory_region.arguments) == 0:
+                    memory_region = \
+                        predicate_to_memory_region[Memory_region(name=mapping.memory_region.name)]
                 else:
                     assert False, "Unexpected."
             else:
                 assert False, "Unexpected."
 
             system_page_color = predicate_to_system_page_color[mapping.page_color]
-            assignment[system_page_color].add(memory_consumer)
+            assignment[system_page_color].add(memory_region)
 
         return assignment

@@ -15,7 +15,7 @@ class PageColoringModelPrettyPrinter:
         print("=" * 120)
 
     @staticmethod
-    def print_memory_consumers(system: System) -> None:
+    def print_memory_regions(system: System) -> None:
         fmt0 = PageColoringModelPrettyPrinter.format_column_type
         fmt1 = PageColoringModelPrettyPrinter.format_column_name
         fmt2 = PageColoringModelPrettyPrinter.format_column_memory_size
@@ -23,10 +23,10 @@ class PageColoringModelPrettyPrinter:
         PageColoringModelPrettyPrinter.print_bar()
         print(fmt0.format('Type') + ' | ' + fmt1.format('Name') + ' | ' + fmt2.format('Memory size'))
         PageColoringModelPrettyPrinter.print_bar()
-        for memory_consumer in system.get_all_memory_consumers():
-            print(fmt0.format(str(type(memory_consumer).__name__))
-                  + ' | ' + fmt1.format(memory_consumer.get_name())
-                  + ' | ' + fmt2.format(memory_consumer.get_memory_size())
+        for memory_region in system.get_memory_regions():
+            print(fmt0.format(str(type(memory_region).__name__))
+                  + ' | ' + fmt1.format(memory_region.get_name())
+                  + ' | ' + fmt2.format(memory_region.get_memory_size())
                   )
         PageColoringModelPrettyPrinter.print_bar()
 
@@ -53,12 +53,12 @@ class PageColoringModelPrettyPrinter:
         print(fmt0.format('Type') + ' | ' + fmt1.format('Name') + ' | ' + fmt2.format('Color(s)'))
         PageColoringModelPrettyPrinter.print_bar()
 
-        for memory_consumer in system.get_all_memory_consumers():
-            print(fmt0.format(str(type(memory_consumer).__name__))
-                  + ' | ' + fmt1.format(memory_consumer.get_name())
+        for memory_region in system.get_memory_regions():
+            print(fmt0.format(str(type(memory_region).__name__))
+                  + ' | ' + fmt1.format(memory_region.get_name())
                   + ' | ', end=''
                   )
-            for color in memory_consumer.get_colors():
+            for color in memory_region.get_colors():
                 print(fmt2.format(str(color)))
                 print(fmt0.format("")
                       + ' | ' + fmt1.format("")
@@ -68,7 +68,7 @@ class PageColoringModelPrettyPrinter:
         PageColoringModelPrettyPrinter.print_bar()
 
     @staticmethod
-    def print_cache_isolation_domains(cache_isolation_domains: List[Set[MemoryConsumer]]):
+    def print_cache_isolation_domains(cache_isolation_domains: List[Set[MemoryRegion]]):
         fmt0 = PageColoringModelPrettyPrinter.format_column_number
         fmt1 = PageColoringModelPrettyPrinter.format_column_cache_isolation_domain_members
 
@@ -88,7 +88,7 @@ class PageColoringModelPrettyPrinter:
         PageColoringModelPrettyPrinter.print_bar()
 
     @staticmethod
-    def print_executor_cpu_constraints(executor_cpu_constraints: Dict[MemoryConsumer, Set[Hardware.CPU]]):
+    def print_executor_cpu_constraints(executor_cpu_constraints: Dict[MemoryRegion, Set[Hardware.CPU]]):
         fmt0 = '{0: <25}'
         fmt1 = '{0: <50}'
 
@@ -105,7 +105,7 @@ class PageColoringModelPrettyPrinter:
         PageColoringModelPrettyPrinter.print_bar()
 
     @staticmethod
-    def print_unassigned_system_page_colors(system: System, assignment: Dict[Hardware.SystemPageColor, Set[MemoryConsumer]]):
+    def print_unassigned_system_page_colors(system: System, assignment: Dict[Hardware.SystemPageColor, Set[MemoryRegion]]):
         # Assumption: All SystemPageColors are contained in assignment.keys()
 
         assert (all(spc in assignment.keys() for spc in system.get_system_page_colors()))
@@ -181,10 +181,10 @@ class PageColoringModelPrettyPrinter:
               + fmt3.format('Pages')
         )
         PageColoringModelPrettyPrinter.print_bar()
-        for memory_consumer in system.get_all_memory_consumers():
-            print(fmt0.format(str(type(memory_consumer).__name__))
-                  + ' | ' + fmt1.format(memory_consumer.get_name())
-                  + ' | ' + fmt2.format(memory_consumer.get_memory_size())
-                  + ' | ' + fmt3.format(str(memory_consumer.get_pages()))
+        for memory_region in system.get_memory_regions():
+            print(fmt0.format(str(type(memory_region).__name__))
+                  + ' | ' + fmt1.format(memory_region.get_name())
+                  + ' | ' + fmt2.format(memory_region.get_memory_size())
+                  + ' | ' + fmt3.format(str(memory_region.get_pages()))
                   )
         PageColoringModelPrettyPrinter.print_bar()

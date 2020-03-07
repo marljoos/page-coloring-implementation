@@ -16,7 +16,7 @@ integrated into a separation kernel (SK) build system.
 
 class System:
     """The system consists of all relevant information to infer page coloring information including hardware and
-    software (MemoryConsumers, Subjects, Kernel)"""
+    software (MemoryRegions, Subjects, Kernel)"""
 
     # Access to a page frame in physical memory will affect several cache sets of several cache levels.
     # These affected cache sets represent a cache colors for their cache.
@@ -29,11 +29,11 @@ class System:
     def __init__(
             self,
             hardware: 'Hardware',
-            memory_consumers: List['MemoryConsumer'],
+            memory_regions: List['MemoryRegion'],
             page_color_to_page_address_mapping_dump_file=None):
 
         self._hardware = hardware
-        self._memory_consumers = memory_consumers
+        self._memory_regions = memory_regions
 
         self._cache_colors = self._construct_cache_colors(hardware)
         self._page_colors = self._construct_page_colors(hardware, self._cache_colors)
@@ -53,8 +53,8 @@ class System:
 
         self._system_page_colors = self._construct_system_page_colors(hardware, self._page_colors)
 
-    def get_all_memory_consumers(self):
-        return self._memory_consumers
+    def get_memory_regions(self):
+        return self._memory_regions
 
     def get_hardware(self):
         return self._hardware
@@ -347,7 +347,7 @@ class Hardware:
         Note that not all SystemPageColors must be assigned resp. can be assigned under certain security circumstances.
         E. g. if Subject1 is only running on CPU_1, belongs to its own exclusive cache isolation domain
         (without others members) and gets the SystemPagecolor
-        SPC(CPU_1, PC(['CC(L1_1)', 'CC(L2_5)', 'CC(L3_85)'])) assigned. Then no other MemoryConsumer may get
+        SPC(CPU_1, PC(['CC(L1_1)', 'CC(L2_5)', 'CC(L3_85)'])) assigned. Then no other MemoryRegion may get
         SystemPageColor SPC(A, PC(['CC(L1_1)', 'CC(L2_5)', 'CC(L3_85)'])) for each A in (CPU_1, CPU_2, ...)
         because L3 may be a CPU shared cache and security-sensitive cache interference in CC(L3_85) would happen.
         """
@@ -534,23 +534,23 @@ class Executor:
         pass
 
 
-class MemoryConsumer:
-    """A MemoryConsumer represents memory consuming objects like kernels, subjects or channels.
+class MemoryRegion:
+    """A MemoryRegion represents objects which require memories such as kernels, subjects or channels.
 
-    A MemoryConsumer consumes certain memory of size $memsize > 0
+    A MemoryRegion requires certain memory of size $memsize > 0
     and may get assigned an address space of size $memsize and a color
     for this address space.
-    A MemoryConsumer may also have a list of Executors which are accessing (read/write/execute) the memory region.
+    A MemoryRegion may also have a list of Executors which are accessing (read/write/execute) the memory region.
     """
 
     def __init__(self, name: str, memory_size: int, page_size: int = 4096):
         """
         Args:
-            memory_size: Memory size of memory consumer in bytes.
+            memory_size: Memory size of memory region in bytes.
             page_size: Page size in bytes.
         """
 
-        assert memory_size % page_size == 0, "Memory size of memory consume must be a multiple of page size."
+        assert memory_size % page_size == 0, "Memory size of memory region must be a multiple of page size."
         assert memory_size > 0, "Memory size must be positive."
 
         self._name = name
@@ -588,7 +588,7 @@ class MemoryConsumer:
 
     def get_pages(self):
         if not self._pages:
-            raise Warning("No pages assigned to MemoryConsumer.")
+            raise Warning("No pages assigned to MemoryRegion.")
         return self._pages
 
     # TODO: Possibly deprecated.
@@ -610,7 +610,7 @@ class MemoryConsumer:
 
         assert len(address_space) > 0, "There must be at least one range of addresses specified."
         assert __address_space_size(address_space) == self._memory_size,\
-            "Size of specified address space must comply to the memory requirement/size of the MemoryConsumer."
+            "Size of specified address space must comply to the memory requirement/size of the MemoryRegion."
         assert __address_space_not_overlapping(address_space),\
             "Address ranges must not be overlapping."
 
@@ -622,14 +622,14 @@ class MemoryConsumer:
 
 
 # We assume that Kernel memory pages can also be colored easily. #ASSMS-KERNEL-PAGE-COLORING
-class Kernel(MemoryConsumer, Executor):
+class Kernel(MemoryRegion, Executor):
     def __init__(self, name, memory_size):
         super().__init__(name, memory_size)
 
         self.add_executor(self)
 
 
-class Subject(MemoryConsumer, Executor):
+class Subject(MemoryRegion, Executor):
     """A subject represents a running instance of a component on top of a SK.
 
     It has a memory requirement (in Byte) and may have channels to other subjects.
@@ -677,7 +677,7 @@ class Subject(MemoryConsumer, Executor):
         return self.inchannels[subject] + self.outchannels[subject]
 
 
-class Channel(MemoryConsumer):
+class Channel(MemoryRegion):
     """A Channel represents an unidirectional communication relationship between
     a source subject and a target subject. A Channel has a memory requirement (in Byte).
     """
@@ -701,7 +701,7 @@ class Channel(MemoryConsumer):
 
 
 class ColorAssigner(ABC):
-    """Meta class responsible for assigning colors to MemoryConsumers."""
+    """Meta class responsible for assigning colors to MemoryRegions."""
 
     class ColorAssignmentException(Exception):
         pass
@@ -713,16 +713,16 @@ class ColorAssigner(ABC):
             super().__init__(default_message)
 
     @staticmethod
-    def apply_assignment(assignment: Dict[Hardware.SystemPageColor, Set[MemoryConsumer]]):
-        for color, memory_consumers in assignment.items():
-            for memory_consumer in memory_consumers:
+    def apply_assignment(assignment: Dict[Hardware.SystemPageColor, Set[MemoryRegion]]):
+        for color, memory_regions in assignment.items():
+            for memory_region in memory_regions:
                 # logging.debug("Add color: " + str(color))
-                memory_consumer.add_color(color)
+                memory_region.add_color(color)
 
     @staticmethod
-    def reset_colors(all_memory_consumers: Dict[str, MemoryConsumer]):
-        for memory_consumer in all_memory_consumers.values():
-            memory_consumer.reset_colors()
+    def reset_colors(all_memory_regions: Dict[str, MemoryRegion]):
+        for memory_region in all_memory_regions.values():
+            memory_region.reset_colors()
 
     @staticmethod
  #   @abstractmethod
@@ -789,31 +789,31 @@ class PageAssigner:
         # make clone, since we remove page colors from mapping during page frame distribution
         pc_to_pages = copy.deepcopy(system.get_page_color_to_page_address_mapping())
 
-        memory_consumers = system.get_all_memory_consumers()
+        memory_regions = system.get_memory_regions()
 
-        for mc in memory_consumers:
-            mc_spcs = mc.get_colors()
-            mc_pcs = set()
-            for spc in mc_spcs:
-                mc_pcs.add(spc.get_page_color())
+        for mr in memory_regions:
+            mr_spcs = mr.get_colors()
+            mr_pcs = set()
+            for spc in mr_spcs:
+                mr_pcs.add(spc.get_page_color())
 
-            mc_memory_size = mc.get_memory_size()
+            mr_memory_size = mr.get_memory_size()
 
-            mc_pages = []
+            mr_pages = []
 
-            mc_pcs_cycle = itertools.cycle(mc_pcs)
-            while mc_memory_size > 0:
-                mc_memory_size = mc_memory_size - page_size
-                current_pc = next(mc_pcs_cycle)
+            mr_pcs_cycle = itertools.cycle(mr_pcs)
+            while mr_memory_size > 0:
+                mr_memory_size = mr_memory_size - page_size
+                current_pc = next(mr_pcs_cycle)
                 pages_for_pc = pc_to_pages[current_pc]
 
                 if pages_for_pc:
                     page_to_distribute = pc_to_pages[current_pc][0]
                     pages_for_pc.remove(page_to_distribute)
-                    mc_pages.append(page_to_distribute)
+                    mr_pages.append(page_to_distribute)
                 else:
                     assert False, "Exhaustion."  # TODO: Documentation.
 
-            mc.set_pages(mc_pages)
+            mr.set_pages(mr_pages)
 
 

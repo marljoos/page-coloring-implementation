@@ -116,7 +116,7 @@ def main():
     #                                                              (Trusted Crypto) <-> (Untrusted Linux VS-NfD-2)
     #                                                              (Trusted Crypto) <-> (Untrusted Linux Public)
     #                                                      (Untrusted Linux Public) <-> (Untrusted App)
-    # TODO: model potentially reserved address space as MemoryConsumer
+    # TODO: model potentially reserved address space as MemoryRegion
 
     # Specification of executors and their memory requirements.
     executors = {
@@ -156,7 +156,7 @@ def main():
 
     executors_list = list(executors.values())
 
-    all_memory_consumers = executors_list + channels
+    memory_regions = executors_list + channels
 
     # Specification of distinct cache isolation domains.
     cache_isolation_domains = [
@@ -188,7 +188,7 @@ def main():
 
     system = System(
         hardware=hardware,
-        memory_consumers=all_memory_consumers,
+        memory_regions=memory_regions,
         page_color_to_page_address_mapping_dump_file="data/page_color_to_page_address_mapping_dump.pkl")
 
     logging.info("Cache colors (Cache color = lists of affected sets by one memory page regarding one level of cache):")
@@ -200,8 +200,8 @@ def main():
     logging.info("System page colors (System page color: CPU + Page color):")
     PageColoringModelPrettyPrinter.print_system_page_colors(system)
 
-    logging.info("Memory consumers:")
-    PageColoringModelPrettyPrinter.print_memory_consumers(system)
+    logging.info("Memory regions:")
+    PageColoringModelPrettyPrinter.print_memory_regions(system)
 
     logging.info("Cache isolation domains:")
     PageColoringModelPrettyPrinter.print_cache_isolation_domains(cache_isolation_domains)
@@ -225,7 +225,7 @@ def main():
     logging.info("Assigning pages.")
     PageAssigner.assign_pages_simple(system)
     logging.info("Assigning pages. Finished.")
-    # TODO: Print MemoryConsumer to address space mapping
+    # TODO: Print MemoryRegion to address space mapping
     PageColoringModelPrettyPrinter.print_page_assignment(system)
 
     # logging.info("Clingo output:")

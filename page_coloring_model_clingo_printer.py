@@ -54,18 +54,18 @@ class PageColoringModelClingoPrinter:
 
         print("cache_isolation_domain(1.." + str(len(cache_isolation_domains)) + ").")
 
-        for i, memory_consumers in enumerate(cache_isolation_domains, start=1):
-            for memory_consumer in memory_consumers:
-                mc = memory_consumer
-                if isinstance(mc, Channel):
-                    source_name = clingo(mc.get_source().get_name())
-                    target_name = clingo(mc.get_target().get_name())
+        for i, memory_regions in enumerate(cache_isolation_domains, start=1):
+            for memory_region in memory_regions:
+                mr = memory_region
+                if isinstance(mr, Channel):
+                    source_name = clingo(mr.get_source().get_name())
+                    target_name = clingo(mr.get_target().get_name())
 
-                    mc_name = "c(" + source_name + ", " + target_name + ")"
+                    mr_name = "c(" + source_name + ", " + target_name + ")"
                 else:
-                    mc_name = clingo(mc.get_name())
+                    mr_name = clingo(mr.get_name())
 
-                print("mc_cache_isolation(" + mc_name + ", " + str(i) + ").")
+                print("mr_cache_isolation(" + mr_name + ", " + str(i) + ").")
 
     @staticmethod
     def print_cache_colors(system: System):
