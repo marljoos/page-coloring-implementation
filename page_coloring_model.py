@@ -309,6 +309,10 @@ class Hardware:
         def get_id(self):
             return str(self.id)
 
+        def __eq__(self, other):
+            return isinstance(other, Hardware.CacheColor) and str(self) == str(other)
+
+
     class PageColor:
         """A PageColor is a list of CacheColors. The first list element refers to the CacheColor of the L1 cache,
         the second element to the CacheColor of the L2 cache, ..."""
