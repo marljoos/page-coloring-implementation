@@ -559,6 +559,7 @@ class MemoryConsumer:
         self._color = None
         self._executors: List[Executor] = []  # TODO: Documentation
         self._colors = []
+        self._pages = []
 
     def get_name(self):
         return self._name
@@ -581,6 +582,16 @@ class MemoryConsumer:
     def get_executors(self):
         return self._executors
 
+    def set_pages(self, pages: List[int]):
+        # TODO: Validity checks?
+        self._pages = pages
+
+    def get_pages(self):
+        if not self._pages:
+            raise Warning("No pages assigned to MemoryConsumer.")
+        return self._pages
+
+    # TODO: Possibly deprecated.
     def set_address_space(self, address_space: List[range]):
         def __address_space_size(address_space: List[range]) -> int:
             size = 0
@@ -605,6 +616,7 @@ class MemoryConsumer:
 
         self._address_space = address_space
 
+    # TODO: Possibly deprecated.
     def get_address_space(self):
         return self._address_space
 
