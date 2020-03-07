@@ -725,7 +725,7 @@ class ColorAssigner(ABC):
             memory_consumer.reset_colors()
 
     @staticmethod
-    @abstractmethod
+ #   @abstractmethod
     def get_assignment():
         pass
 
