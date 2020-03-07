@@ -3,7 +3,7 @@
 import copy
 import logging
 import sys
-from typing import List, Dict, Set, Tuple, Callable, FrozenSet
+from typing import List, Dict, Set, Tuple, Callable, FrozenSet, Union
 from abc import ABC, abstractmethod
 
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
@@ -127,18 +127,22 @@ class System:
         return page_colors
 
     @staticmethod
-    def _load_page_color_to_page_address_mapping(page_color_to_page_address_mapping_dump_file):
+    def _load_page_color_to_page_address_mapping(page_color_to_page_address_mapping_dump_file)\
+            -> Union[Dict['Hardware.PageColor', List[int]], None]:
         """Loads page color to page address mapping from file."""
         import pickle
-        with open(page_color_to_page_address_mapping_dump_file, 'rb') as input:
-            return pickle.load(input)
+        try:
+            with open(page_color_to_page_address_mapping_dump_file, 'rb') as input:
+                return pickle.load(input)
+        except OSError:
+            return None
 
     def _construct_page_color_to_page_address_mapping(self, hardware: 'Hardware', cache_colors: AllCacheColors):
         num_of_cache_levels: int = hardware.get_number_of_cache_levels()
         cache_of_level = hardware.get_cache_information()
         page_size = hardware.get_page_size()
         page_addresses = hardware.get_page_addresses()
-        page_color_to_page_address_mapping = {page_color: set() for page_color in self._page_colors}
+        page_color_to_page_address_mapping = {page_color: [] for page_color in self._page_colors}
 
         logging.info("_construct_page_color_to_page_address_mapping: Construct PageColor to page address mapping ...")
         for page_address in page_addresses:
@@ -152,7 +156,7 @@ class System:
 
                 all_cache_colors_of_page_color.append(cache_colors[i][affected_cache_sets_of_page])
 
-            page_color_to_page_address_mapping[Hardware.PageColor(all_cache_colors_of_page_color)].add(page_address)
+            page_color_to_page_address_mapping[Hardware.PageColor(all_cache_colors_of_page_color)].append(page_address)
 
         logging.info("_construct_page_color_to_page_address_mapping: Finished.")
 
