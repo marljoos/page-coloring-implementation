@@ -779,3 +779,41 @@ class IndexFunctionLibrary:
         # (3, L3_number_of_sets_per_slice -1) -> 3*L3_number_of_sets_per_slice + L3_number_of_sets_per_slice - 1
 
         return lambda addr: address_to_cache_slice_number(addr) * L3_number_of_sets + address_to_cache_set_number(addr)
+
+
+class PageAssigner:
+    @staticmethod
+    def assign_pages_simple(system: System):
+        page_size = system.get_hardware().get_page_size()
+        import itertools
+        # make clone, since we remove page colors from mapping during page frame distribution
+        pc_to_pages = copy.deepcopy(system.get_page_color_to_page_address_mapping())
+
+        memory_consumers = system.get_all_memory_consumers()
+
+        for mc in memory_consumers:
+            mc_spcs = mc.get_colors()
+            mc_pcs = set()
+            for spc in mc_spcs:
+                mc_pcs.add(spc.get_page_color())
+
+            mc_memory_size = mc.get_memory_size()
+
+            mc_pages = []
+
+            mc_pcs_cycle = itertools.cycle(mc_pcs)
+            while mc_memory_size > 0:
+                mc_memory_size = mc_memory_size - page_size
+                current_pc = next(mc_pcs_cycle)
+                pages_for_pc = pc_to_pages[current_pc]
+
+                if pages_for_pc:
+                    page_to_distribute = pc_to_pages[current_pc][0]
+                    pages_for_pc.remove(page_to_distribute)
+                    mc_pages.append(page_to_distribute)
+                else:
+                    assert False, "Exhaustion."  # TODO: Documentation.
+
+            mc.set_pages(mc_pages)
+
+
