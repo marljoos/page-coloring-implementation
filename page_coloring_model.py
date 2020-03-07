@@ -191,6 +191,9 @@ class System:
     def get_system_page_colors(self):
         return self._system_page_colors
 
+    def get_page_color_to_page_address_mapping(self):
+        return self._page_color_to_page_address_mapping
+
 
 class Hardware:
     """Description of a hardware system which consists of CPU cores, main memory and (multiple layers) of caches."""
