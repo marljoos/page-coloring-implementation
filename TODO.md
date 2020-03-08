@@ -1,14 +1,13 @@
 # TODOs
-* Add address space assignment method. / Concrete assignment of pages (MemoryAllocator)
 * Take care of "set dueling"
 * Testing / Unit tests
 * Add shared/private attribute to Caches
 * Move Color stuff from Hardware to System, Colors are more related to the System than to the Hardware
-* Rename MemoryConsumer to MemoryRegion
 
 # Postponed TODOs
 * Split L1 instruction cache & L1 data cache
 * Take care of reserved memory.
+* Specification of bootstrap processor in Hardware class needed?
 
 # DONE
 * must somehow model shared memory (channels)
@@ -27,3 +26,5 @@
     * Implement CPU isolation domains
     * Implement Subject->CPU constraints for color assignment
 * Take care of complex indexing in L3 cache. / Indexing function
+* Rename MemoryRegion to MemoryRegion
+* Add address space assignment method. / Concrete assignment of pages (MemoryAllocator)
