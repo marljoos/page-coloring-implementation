@@ -176,7 +176,7 @@ mr_cpu(c(X,Y), CPU) :- channel(X,Y), mr_cpu(Y, CPU).
 :- cache_isolation_domain(X), 0 {mr_cache_isolation(MC,X): memory_region(MC)} 0.
 
 % 8. Gesucht ist das Prädikat
-%    map_pc(X,Y) : (MemoryRegion, PageColors) -> Bool, für das gilt:
+%    map_pc(X,Y) : (MemoryRegions, PageColors) -> Bool, für das gilt:
 %    - R1: Jedem MemoryRegion X wird eine oder mehrere PageColors ∈ 𝒫 ⁺(PageColors) zugewiesen.
 1 { map_pc(X, page_color(l1_color(A, CPU), l2_color(B, CPU), l3_color(C)))
 	: page_color(l1_color(A, CPU), l2_color(B, CPU), l3_color(C)) }
@@ -189,7 +189,7 @@ mr_cpu(c(X,Y), CPU) :- channel(X,Y), mr_cpu(Y, CPU).
 %          page_color(L1_1, L2_1, L3_1), ..., page_color(IDN, L1_N, L2_N, L3_N) zu,
 %          sodass die Cache-Ids aller PageColors übereinstimmen, und pro PageColor
 %		   eine X_CPU ausgewählt wird und die CPUs der CacheColors bestimmt.
-{	map_pc(page_color(l1_color(A, OTHER_CPU), l2_color(B, OTHER_CPU), l3_color(C)))
+{	map_pc(X, page_color(l1_color(A, OTHER_CPU), l2_color(B, OTHER_CPU), l3_color(C)))
 	 : mr_cpu(X, OTHER_CPU), OTHER_CPU != X_CPU
 }
 	:- memory_region(X),
