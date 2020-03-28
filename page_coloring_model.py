@@ -784,6 +784,8 @@ class IndexFunctionLibrary:
 class PageAssigner:
     @staticmethod
     def assign_pages_simple(system: System):
+        # TODO: Documentation/algorithm idea.
+
         page_size = system.get_hardware().get_page_size()
         import itertools
         # make clone, since we remove page colors from mapping during page frame distribution
@@ -801,18 +803,39 @@ class PageAssigner:
 
             mr_pages = []
 
-            mr_pcs_cycle = itertools.cycle(mr_pcs)
             while mr_memory_size > 0:
+                mr_pcs_cycle = itertools.cycle(mr_pcs)
                 mr_memory_size = mr_memory_size - page_size
-                current_pc = next(mr_pcs_cycle)
-                pages_for_pc = pc_to_pages[current_pc]
 
-                if pages_for_pc:
-                    page_to_distribute = pc_to_pages[current_pc][0]
-                    pages_for_pc.remove(page_to_distribute)
-                    mr_pages.append(page_to_distribute)
-                else:
-                    assert False, "Exhaustion."  # TODO: Documentation.
+                # If there are no more pages for one page color, remove PageColor from mr_pcs and create new
+                # cycling Iterator
+                # logging.debug(str(mr_pcs))
+                # logging.debug(mr.get_name())
+                # logging.debug(str(mr.get_colors()))
+                current_pc = next(mr_pcs_cycle)
+                while (not pc_to_pages[current_pc]) and len(mr_pcs) > 1:
+                    del pc_to_pages[current_pc]
+                    mr_pcs.remove(current_pc)
+                    mr_pcs_cycle = itertools.cycle(mr_pcs)
+                    current_pc = next(mr_pcs_cycle)
+
+                if len(mr_pcs) == 0:
+                    assert False, "Exhaustion when assigning page color "\
+                                  + str(current_pc)\
+                                  + " to " + mr.get_name()   # TODO: Documentation.
+
+                pages_for_pc = pc_to_pages[current_pc]
+                page_to_distribute = pc_to_pages[current_pc][0]
+                pages_for_pc.remove(page_to_distribute)
+                mr_pages.append(page_to_distribute)
+
+                # if pages_for_pc:
+                #     page_to_distribute = pc_to_pages[current_pc][0]
+                #     pages_for_pc.remove(page_to_distribute)
+                #     mr_pages.append(page_to_distribute)
+                # else:
+                #     pass
+
 
             mr.set_pages(mr_pages)
 
