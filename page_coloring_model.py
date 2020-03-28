@@ -442,10 +442,11 @@ class Cache:
                  associativity: int,
                  cacheline_capacity: int,
                  shared: bool = False,  # TODO: Documentation
-                 flushed: bool = False,
+                 flushed: bool = False, # TODO: Deprecate?
                  page_size: int = 4096,
                  name_prefix: str = None,  # TODO: Documentation
                  index_function: IndexFunction = None  # TODO: Documentation
+                 # TODO: Add cpu_bound : bool?
                  ):
         """
         Args:
@@ -643,6 +644,19 @@ class Subject(MemoryRegion, Executor):
 
         self.add_executor(self)
 
+        self.readfrom_channels : List[Channel] = []
+        self.writesto_channels: List[Channel] = []
+
+    def add_readfrom_channel(self, channel: 'Channel'):
+        self.readfrom_channels.append(channel)
+
+    def add_writesto_channel(self, channel: 'Channel'):
+        self.writesto_channels.append(channel)
+
+    def get_channels2(self) -> List['Channel']:
+        return self.readfrom_channels + self.writesto_channels
+
+    # TODO: Deprecate
     def add_inchannel(self, channel: 'Channel'):
         from_subject = channel.get_source()
         if from_subject not in self.inchannels:
@@ -650,6 +664,7 @@ class Subject(MemoryRegion, Executor):
         else:
             self.inchannels[from_subject].append(channel)
 
+    # TODO: Deprecate
     def add_outchannel(self, channel: 'Channel'):
         to_subject = channel.get_target()
         if to_subject not in self.outchannels:
@@ -657,6 +672,7 @@ class Subject(MemoryRegion, Executor):
         else:
             self.outchannels[to_subject].append(channel)
 
+    # TODO: Deprecate
     def get_channels(self):
         """Returns all in and out channels of this subject.
 
@@ -678,11 +694,20 @@ class Subject(MemoryRegion, Executor):
 
 
 class Channel(MemoryRegion):
-    """A Channel represents an unidirectional communication relationship between
+    """A Channel is a MemoryRegion which has one writer and one or more readers.
+     A Channel has a memory requirement (in Byte).
+
+    OBSOLETE: A Channel represents an unidirectional communication relationship between
     a source subject and a target subject. A Channel has a memory requirement (in Byte).
+
     """
 
-    def __init__(self, name: str, memory_size: int, source: Subject, target: Subject):
+    # TODO: To be deprecated
+    def __init__(
+            self, name: str,
+            memory_size: int,
+            source: Subject,
+            target: Subject):
         super().__init__(name, memory_size)
         self.source = source
         self.target = target
@@ -693,11 +718,35 @@ class Channel(MemoryRegion):
         self.add_executor(source)
         self.add_executor(target)
 
+    def __init__(
+            self, name: str,
+            memory_size: int,
+            writer: Subject,
+            readers: List[Subject]):
+
+        super().__init__(name, memory_size)
+        assert len(readers) > 0
+        self.readers = readers
+        self.writer = writer
+
+        writer.add_writesto_channel(self)
+
+        for reader in readers:
+            reader.add_readfrom_channel(self)
+
+    # TODO: To be deprecated
     def get_source(self):
         return self.source
 
+    # TODO: To be deprecated
     def get_target(self):
         return self.target
+
+    def get_writer(self):
+        return self.writer
+
+    def get_readers(self):
+        return self.readers
 
 
 class ColorAssigner(ABC):
