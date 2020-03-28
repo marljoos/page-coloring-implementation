@@ -121,10 +121,10 @@ def main():
     # Specification of executors and their memory requirements.
     executors = {
         'Kernel':           Kernel('Muen SK', 16 * PAGE_SIZE),
-        'T_APP':            Subject('Trusted App', 2 * PAGE_SIZE),
-        'T_CRYPTO':         Subject('Trusted Crypto', 4 * PAGE_SIZE),
+        'T_APP':            Subject('Trusted App', 3 * PAGE_SIZE),
+        'T_CRYPTO':         Subject('Trusted Crypto', 3 * PAGE_SIZE),
         'U_Linux_VS_V':     Subject('Untrusted Linux VS-Vertr', 8 * PAGE_SIZE),
-        'U_Linux_VS_NfD_1': Subject('Untrusted Linux VS-NfD-1', 8 * PAGE_SIZE),
+        'U_Linux_VS_NfD_1': Subject('Untrusted Linux VS-NfD-1', 1 * 8193 * PAGE_SIZE),
         'U_Linux_VS_NfD_2': Subject('Untrusted Linux VS-NfD-2', 8 * PAGE_SIZE),
         'U_Linux_Public':   Subject('Untrusted Linux Public', 8 * PAGE_SIZE),
         'U_App':            Subject('Untrusted App', 8 * PAGE_SIZE)
@@ -134,44 +134,161 @@ def main():
 
     # Specification of allowed unidirectional communication relationships (channels)
     # between two subjects and the memory requirement of the channel.
+    channels2 = {
+        'TA_2_TC':           Channel(
+                                name='Trusted App -> Trusted Crypto',
+                                memory_size=6 * PAGE_SIZE,
+                                writer=e['T_APP'],
+                                readers=[e['T_CRYPTO']]),
+        'TC_2_TA':            Channel(
+                                name='Trusted App <- Trusted Crypto',
+                                memory_size=6 * PAGE_SIZE,
+                                writer=e['T_CRYPTO'],
+                                readers=[e['T_APP']]),
+        ##
+        'TC_2_UVertr':         Channel(
+                                name='Trusted Crypto -> Untrusted Linux VS-Vertr',
+                                memory_size=6 * PAGE_SIZE,
+                                writer=e['T_CRYPTO'],
+                                readers=[e['U_Linux_VS_V']]),
+        'UVertr_2_TC':       Channel(
+                                name='Trusted Crypto <- Untrusted Linux VS-Vertr',
+                                memory_size=6 * PAGE_SIZE,
+                                writer=e['U_Linux_VS_V'],
+                                readers=[e['T_CRYPTO']]),
+        ##
+        'TC_2_UNFD1':       Channel(
+                                name='Trusted Crypto -> Untrusted Linux VS-NfD-1',
+                                memory_size=6 * PAGE_SIZE,
+                                writer=e['T_CRYPTO'],
+                                readers=[e['U_Linux_VS_NfD_1']]),
+        'UNFD1_2_TC':       Channel(
+                                name='Trusted Crypto <- Untrusted Linux VS-NfD-1',
+                                memory_size=6 * PAGE_SIZE,
+                                writer=e['U_Linux_VS_NfD_1'],
+                                readers=[e['T_CRYPTO']]),
+        ##
+        'TC_2_UNFD2':       Channel(
+                                name='Trusted Crypto -> Untrusted Linux VS-NfD-2',
+                                memory_size=6 * PAGE_SIZE,
+                                writer=e['T_CRYPTO'],
+                                readers=[e['U_Linux_VS_NfD_2']]),
+        'UNFD2_2_TC':       Channel(
+                                name='Trusted Crypto <- Untrusted Linux VS-NfD-2',
+                                memory_size=6 * PAGE_SIZE,
+                                writer=e['U_Linux_VS_NfD_2'],
+                                readers=[e['T_CRYPTO']]),
+        ##
+        'TC_2_UPUB':        Channel(
+                                name='Trusted Crypto -> Untrusted Linux Public',
+                                memory_size=6 * PAGE_SIZE,
+                                writer=e['T_CRYPTO'],
+                                readers=[e['U_Linux_Public']]),
+        'UPUB_2_TC':        Channel(
+                                name='Trusted Crypto <- Untrusted Linux Public',
+                                memory_size=6 * PAGE_SIZE,
+                                writer=e['U_Linux_Public'],
+                                readers=[e['T_CRYPTO']]),
+        ##
+        'UPUB_2_UA':       Channel(
+                                name='Untrusted Linux Public -> Untrusted App',
+                                memory_size=2 * PAGE_SIZE,
+                                writer=e['U_Linux_Public'],
+                                readers=[e['U_App']]),
+        'UA_2_UPUB':       Channel(
+                                name='Untrusted Linux Public <- Untrusted App',
+                                memory_size=2 * PAGE_SIZE,
+                                writer=e['U_App'],
+                                readers=[e['U_Linux_Public']])
+    }
     channels = [
-        Channel('Trusted App -> Trusted Crypto', 6 * PAGE_SIZE, e['T_APP'], e['T_CRYPTO']),
-        Channel('Trusted App <- Trusted Crypto', 6 * PAGE_SIZE, e['T_CRYPTO'], e['T_APP']),
+        Channel(
+            name='Trusted App -> Trusted Crypto',
+            memory_size=6 * PAGE_SIZE,
+            writer=e['T_APP'],
+            readers=[e['T_CRYPTO']]),
+        Channel(
+            name='Trusted App <- Trusted Crypto',
+            memory_size=6 * PAGE_SIZE,
+            writer=e['T_CRYPTO'],
+            readers=[e['T_APP']]),
         ##
-        Channel('Trusted Crypto -> Untrusted Linux VS-Vertr', 6 * PAGE_SIZE, e['T_CRYPTO'], e['U_Linux_VS_V']),
-        Channel('Trusted Crypto <- Untrusted Linux VS-Vertr', 6 * PAGE_SIZE, e['U_Linux_VS_V'], e['T_CRYPTO']),
+        Channel(
+            name='Trusted Crypto -> Untrusted Linux VS-Vertr',
+            memory_size=6 * PAGE_SIZE,
+            writer=e['T_CRYPTO'],
+            readers=[e['U_Linux_VS_V']]),
+        Channel(
+            name='Trusted Crypto <- Untrusted Linux VS-Vertr',
+            memory_size=6 * PAGE_SIZE,
+            writer=e['U_Linux_VS_V'],
+            readers=[e['T_CRYPTO']]),
         ##
-        Channel('Trusted Crypto -> Untrusted Linux VS-NfD-1', 6 * PAGE_SIZE, e['T_CRYPTO'], e['U_Linux_VS_NfD_1']),
-        Channel('Trusted Crypto <- Untrusted Linux VS-NfD-1', 6 * PAGE_SIZE, e['U_Linux_VS_NfD_1'], e['T_CRYPTO']),
+        Channel(
+            name='Trusted Crypto -> Untrusted Linux VS-NfD-1',
+            memory_size=6 * PAGE_SIZE,
+            writer=e['T_CRYPTO'],
+            readers=[e['U_Linux_VS_NfD_1']]),
+        Channel(
+            name='Trusted Crypto <- Untrusted Linux VS-NfD-1',
+            memory_size=6 * PAGE_SIZE,
+            writer=e['U_Linux_VS_NfD_1'],
+            readers=[e['T_CRYPTO']]),
         ##
-        Channel('Trusted Crypto -> Untrusted Linux VS-NfD-2', 6 * PAGE_SIZE, e['T_CRYPTO'], e['U_Linux_VS_NfD_2']),
-        Channel('Trusted Crypto <- Untrusted Linux VS-NfD-2', 6 * PAGE_SIZE, e['U_Linux_VS_NfD_2'], e['T_CRYPTO']),
+        Channel(
+            name='Trusted Crypto -> Untrusted Linux VS-NfD-2',
+            memory_size=6 * PAGE_SIZE,
+            writer=e['T_CRYPTO'],
+            readers=[e['U_Linux_VS_NfD_2']]),
+        Channel(
+            name='Trusted Crypto <- Untrusted Linux VS-NfD-2',
+            memory_size=6 * PAGE_SIZE,
+            writer=e['U_Linux_VS_NfD_2'],
+            readers=[e['T_CRYPTO']]),
         ##
-        Channel('Trusted Crypto -> Untrusted Linux Public', 6 * PAGE_SIZE, e['T_CRYPTO'], e['U_Linux_Public']),
-        Channel('Trusted Crypto <- Untrusted Linux Public', 6 * PAGE_SIZE, e['U_Linux_Public'], e['T_CRYPTO']),
+        Channel(
+            name='Trusted Crypto -> Untrusted Linux Public',
+            memory_size=6 * PAGE_SIZE,
+            writer=e['T_CRYPTO'],
+            readers=[e['U_Linux_Public']]),
+        Channel(
+            name='Trusted Crypto <- Untrusted Linux Public',
+            memory_size=6 * PAGE_SIZE,
+            writer=e['U_Linux_Public'],
+            readers=[e['T_CRYPTO']]),
         ##
-        Channel('Untrusted Linux Public -> Untrusted App', 2 * PAGE_SIZE, e['U_Linux_Public'], e['U_App']),
-        Channel('Untrusted Linux Public <- Untrusted App', 2 * PAGE_SIZE, e['U_App'], e['U_Linux_Public'])
+        Channel(
+            name='Untrusted Linux Public -> Untrusted App',
+            memory_size=2 * PAGE_SIZE,
+            writer=e['U_Linux_Public'],
+            readers=[e['U_App']]),
+        Channel(
+            name='Untrusted Linux Public <- Untrusted App',
+            memory_size=2 * PAGE_SIZE,
+            writer=e['U_App'],
+            readers=[e['U_Linux_Public']])
     ]
 
     executors_list = list(executors.values())
 
-    memory_regions = executors_list + channels
+    #memory_regions = executors_list + channels
+    memory_regions = executors_list + list(channels2.values())
+    c = channels2
 
     # Specification of distinct cache isolation domains.
     cache_isolation_domains = [
         {e['Kernel']},  # Cache isolation domain 1: Kernel only
         # Cache isolation domain 2: Trusted subjects only
-        {e['T_CRYPTO'], e['T_APP'], *e['T_CRYPTO'].get_inoutchannels(e['T_APP'])},
+        {e['T_CRYPTO'], e['T_APP'], c['TC_2_TA'], c['TA_2_TC']},
         {e['U_Linux_VS_V']},  # Cache isolation domain 3: VS-Vertr
         {e['U_Linux_VS_NfD_1']},  # Cache isolation domain 4: NfD-1
         {e['U_Linux_VS_NfD_2']},  # Cache isolation domain 5: NfD-2
         {e['U_Linux_Public'],  # Cache isolation domain 6: Public and Untrusted App
-         e['U_App'], *e['U_Linux_Public'].get_inoutchannels(e['U_App'])},
-        {*e['T_CRYPTO'].get_inoutchannels(e['U_Linux_VS_V'])},      # Cache isolation domains
-        {*e['T_CRYPTO'].get_inoutchannels(e['U_Linux_VS_NfD_1'])},  # to prevent mutual interference
-        {*e['T_CRYPTO'].get_inoutchannels(e['U_Linux_VS_NfD_2'])},  # from executors of
-        {*e['T_CRYPTO'].get_inoutchannels(e['U_Linux_Public'])},    # different cache isolation domains
+         e['U_App'], c['UPUB_2_UA'], c['UA_2_UPUB']},
+        {c['TC_2_UVertr'], c['UVertr_2_TC']},      # Cache isolation domains
+        {c['TC_2_UNFD1'], c['UNFD1_2_TC']},  # to prevent mutual interference
+        {c['TC_2_UNFD2'], c['UNFD2_2_TC']},  # from executors of
+        {c['TC_2_UPUB'], c['UPUB_2_TC']},    # different cache isolation domains
     ]
 
     # Specify which CPU must be used by executor.
