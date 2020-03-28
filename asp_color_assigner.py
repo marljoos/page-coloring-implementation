@@ -1,6 +1,7 @@
-from typing import Dict, Set
+from math import ceil
+from typing import Dict, Set, Union
 
-from clorm import Predicate, ConstantField, IntegerField, FactBase, RawField
+from clorm import Predicate, ConstantField, IntegerField, FactBase, RawField, ComplexTerm
 from clorm.clingo import Control, Function, Symbol
 import itertools
 
@@ -10,9 +11,8 @@ from page_coloring_model_clingo_printer import PageColoringModelClingoPrinter
 
 import logging
 
-
 class Memory_region(Predicate):
-    name = RawField
+    name = ConstantField
 
 
 class Executor(Predicate):
@@ -28,8 +28,17 @@ class Subject(Predicate):
 
 
 class Channel(Predicate):
-    source = ConstantField
-    target = ConstantField
+    name = ConstantField
+
+
+class Reads_from(Predicate):
+    executor = Executor.Field
+    channel = Channel.Field
+
+
+class Writes_to(Predicate):
+    executor = Executor.Field
+    channel = Channel.Field
 
 
 class Cpu(Predicate):
@@ -37,28 +46,28 @@ class Cpu(Predicate):
 
 
 class Ex_cpu(Predicate):
-    name = ConstantField
-    cpu_id = IntegerField
+    name = Executor.Field
+    cpu = Cpu.Field
 
 
-class L1_color(Predicate):
-    cache_id = IntegerField
-    cpu_id = IntegerField
+class Level(Predicate):
+    level_id = IntegerField
 
 
-class L2_color(Predicate):
-    cache_id = IntegerField
-    cpu_id = IntegerField
-
-
-class L3_color(Predicate):
+class Cache_color(Predicate):
+    level = Level.Field
     cache_id = IntegerField
 
 
 class Page_color(Predicate):
-    l1_color = L1_color.Field
-    l2_color = L2_color.Field
-    l3_color = L3_color.Field
+    l1_cc = Cache_color.Field
+    l2_cc = Cache_color.Field
+    l3_cc = Cache_color.Field
+
+
+class System_page_color(Predicate):
+    cpu = Cpu.Field
+    pc = Page_color.Field
 
 
 class Cache_isolation_domain(Predicate):
@@ -66,13 +75,21 @@ class Cache_isolation_domain(Predicate):
 
 
 class Mr_cache_isolation(Predicate):
-    member = RawField
-    cid_id = IntegerField
+    mr = Memory_region.Field
+    cid = Cache_isolation_domain.Field
 
 
-class Map_pc(Predicate):
-    memory_region = RawField
-    page_color = Page_color.Field
+class Mr_pc(Predicate):
+    mr = Memory_region.Field
+    pc = Page_color.Field
+# class Map_pc(Predicate):
+#     memory_region = RawField
+#     page_color = Page_color.Field
+
+
+class Mr_spc(Predicate):
+    mr = Memory_region.Field
+    spc = System_page_color.Field
 
 
 class L3_count(Predicate):
@@ -88,12 +105,22 @@ class L1_count(Predicate):
 
 
 class Mr_cpu(Predicate):
-    memory_region = RawField
-    cpu_id = IntegerField
+    mr = Memory_region.Field
+    cpu = Cpu.Field
 
 
 class Mapped(Predicate):
-    color = RawField
+    cc = Cache_color.Field
+
+
+class Mr_min_page_colors(Predicate):
+    mr = Memory_region.Field
+    minimum = IntegerField
+
+
+class Cache_is_cpu_bound(Predicate):
+    cache_level = Level.Field
+    yes_no = ConstantField
 
 
 class ASPColorAssigner(PageColoringModel.ColorAssigner):
@@ -165,27 +192,18 @@ class ASPColorAssigner(PageColoringModel.ColorAssigner):
                 top of the cache isolation domains. See function documentation for details.
         """
 
+        cname = PageColoringModelClingoPrinter.convert_to_clingo_name
+
         assignment = {system_page_color: set() for system_page_color in system.get_system_page_colors()}
 
-        ASP_PROGRAM_PATH = "asp_programs/page-coloring.pl"
-
-        cname = PageColoringModelClingoPrinter.convert_to_clingo_name
+        ASP_PROGRAM_PATH = "asp_programs/page-coloring.lp"
 
         memory_regions = system.get_memory_regions()
 
-        # Create mapping from clingo name to MemoryRegion name
+        # Create mapping from clingo predicate to MemoryRegion name
         predicate_to_memory_region = {}
         for memory_region in memory_regions:
-            if isinstance(memory_region, PageColoringModel.Kernel):
-                predicate_to_memory_region[Memory_region(name=cname(memory_region.get_name()))] = memory_region
-            elif isinstance(memory_region, PageColoringModel.Subject):
-                predicate_to_memory_region[Memory_region(name=cname(memory_region.get_name()))] = memory_region
-            elif isinstance(memory_region, (PageColoringModel.Channel)):
-                src = cname(memory_region.get_source().get_name())
-                trgt = cname(memory_region.get_target().get_name())
-                predicate_to_memory_region[Channel(source=src, target=trgt)] = memory_region
-            else:
-                assert False, "Unexpected condition. Unknown MemoryRegion class."
+            predicate_to_memory_region[Memory_region(name=cname(memory_region.get_name()))] = memory_region
 
         kernel_names = [
             cname(memory_region.get_name())
@@ -199,10 +217,8 @@ class ASPColorAssigner(PageColoringModel.ColorAssigner):
             if isinstance(memory_region, PageColoringModel.Subject)
         ]
 
-        # channel name does mean (source_name, target_name) here
         channel_names = [
-            (cname(memory_region.get_source().get_name()),
-             cname(memory_region.get_target().get_name()))
+            (cname(memory_region.get_name()))
             for memory_region in memory_regions
             if isinstance(memory_region, PageColoringModel.Channel)
         ]
@@ -211,7 +227,25 @@ class ASPColorAssigner(PageColoringModel.ColorAssigner):
 
         kernels = [Kernel(name=n) for n in kernel_names]
         subjects = [Subject(name=n) for n in subject_names]
-        channels = [Channel(source=src, target=trgt) for (src, trgt) in channel_names]
+        #channels = [Channel(source=Executor(name=src), target=Executor(name=trgt)) for (src, trgt) in channel_names]
+        channels = [Channel(name=name) for name in channel_names]
+
+        reads_from = []
+        writes_to = []
+        for memory_region in memory_regions:
+            if isinstance(memory_region, PageColoringModel.Channel):
+                mr_name = cname(memory_region.get_name())
+                for reader in memory_region.get_readers():
+                    reader_name = cname(reader.get_name())
+                    reads_from.append(
+                        Reads_from(executor=Executor(name=reader_name), channel=Channel(name=mr_name))
+                    )
+                writer_name = cname(memory_region.get_writer().get_name())
+                writes_to.append(
+                    Writes_to(executor=Executor(name=writer_name), channel=Channel(name=mr_name))
+                )
+
+
         cpus = [Cpu(cpu_id=int(cpu_core.get_id())) for cpu_core in cpu_cores]
 
         ex_cpus = []
@@ -219,7 +253,8 @@ class ASPColorAssigner(PageColoringModel.ColorAssigner):
             for cpu in cpu_list:
                 executor_name = cname(executor.get_name())
                 ex_cpus.append(
-                    Ex_cpu(name=executor_name, cpu_id=int(cpu.get_id()))
+                    Ex_cpu(name=Executor(name=executor_name), cpu=Cpu(cpu_id=int(cpu.get_id())))
+                    #Ex_cpu(name=executor_name, cpu_id=int(cpu.get_id()))
                 )
 
         # TODO: Everything CacheColors related is inflexible. To be refactored.
@@ -233,18 +268,24 @@ class ASPColorAssigner(PageColoringModel.ColorAssigner):
         l3_cache_ids = list(range(1, num_l3_colors + 1))
 
         l1_colors = [
-            L1_color(cache_id=int(cache_id), cpu_id=int(cpu_core.get_id()))
+            #L1_color(cache_id=int(cache_id), cpu_id=int(cpu_core.get_id()))
+            Cache_color(level=Level(level_id=1), cache_id=cache_id)
             for (cache_id, cpu_core)
             in itertools.product(l1_cache_ids, cpu_cores)
         ]
 
         l2_colors = [
-            L2_color(cache_id=int(cache_id), cpu_id=int(cpu_core.get_id()))
+            #L2_color(cache_id=int(cache_id), cpu_id=int(cpu_core.get_id()))
+            Cache_color(level=Level(level_id=2), cache_id=cache_id)
             for (cache_id, cpu_core)
             in itertools.product(l2_cache_ids, cpu_cores)
         ]
 
-        l3_colors = [L3_color(cache_id=int(cache_id)) for cache_id in l3_cache_ids]
+        l3_colors = [
+            #L3_color(cache_id=int(cache_id))
+            Cache_color(level=Level(level_id=3), cache_id=cache_id)
+            for cache_id in l3_cache_ids
+        ]
 
         predicate_to_system_page_color = {}
         page_colors = []
@@ -254,16 +295,20 @@ class ASPColorAssigner(PageColoringModel.ColorAssigner):
             l1 = page_color.get_cache_colors()[0]
             l2 = page_color.get_cache_colors()[1]
             l3 = page_color.get_cache_colors()[2]
-            l1_color = l1.get_id()
-            l2_color = l2.get_id()
-            l3_color = l3.get_id()
+            l1_color = int(l1.get_id())
+            l2_color = int(l2.get_id())
+            l3_color = int(l3.get_id())
 
-            predicate = Page_color(
-                    l1_color=L1_color(cache_id=int(l1_color), cpu_id=cpu_id),
-                    l2_color=L2_color(cache_id=int(l2_color), cpu_id=cpu_id),
-                    l3_color=L3_color(cache_id=int(l3_color))
+            page_color = Page_color(
+                    l1_cc=Cache_color(level=Level(level_id=1), cache_id=l1_color),
+                    l2_cc=Cache_color(level=Level(level_id=2), cache_id=l2_color),
+                    l3_cc=Cache_color(level=Level(level_id=3), cache_id=l3_color)
+                )
+            predicate = System_page_color(
+                cpu = Cpu(cpu_id=cpu_id),
+                pc = page_color
             )
-            page_colors.append(predicate)
+            page_colors.append(page_color)
             predicate_to_system_page_color[predicate] = system_page_color
 
         clingo_cache_isolations_domains = [
@@ -273,24 +318,43 @@ class ASPColorAssigner(PageColoringModel.ColorAssigner):
         mr_cache_isolations = []
         for cid_id, cache_isolation_domain in enumerate(cache_isolation_domains, start=1):
             for member in cache_isolation_domain:
-                if not isinstance(member, PageColoringModel.Channel):
-                    memory_region = cname(member.get_name())
+                mr_name = cname(member.get_name())
 
-                    mr_cache_isolations.append(
-                        Mr_cache_isolation(member=clorm.clingo.Function(memory_region), cid_id=cid_id)
+                mr_cache_isolations.append(
+                    Mr_cache_isolation(
+                        mr=Memory_region(name=mr_name),
+                        cid=Cache_isolation_domain(cid_id=cid_id)
                     )
-                elif isinstance(member, PageColoringModel.Channel):
-                    source_name = cname(member.get_source().get_name())
-                    target_name = cname(member.get_target().get_name())
+                )
 
-                    mr_cache_isolations.append(
-                        Mr_cache_isolation(
-                            member=Function("c", [Function(source_name), Function(target_name)]),
-                            cid_id=int(cid_id)
-                        )
-                    )
-                else:
-                    assert False, "Unexpected condition."
+        # Calculate minimum numbers of page colors of a MemoryRegion
+        mr_min_page_colors = []
+        num_of_page_colors = len(system.get_page_colors())
+        pages_per_page_color = len(system.get_hardware().get_page_addresses()) / num_of_page_colors
+        page_size = system.get_hardware().get_page_size()
+        for memory_region in system.get_memory_regions():
+            min_page_colors_of_mr = int(ceil(
+                (memory_region.get_memory_size() / page_size) / pages_per_page_color
+            ))
+            #logging.debug("Minimum page colors of " + memory_region.get_name() + ": " + str(min_page_colors_of_mr))
+
+            mr_name = cname(memory_region.get_name())
+
+            mr_min_page_colors_pred = Mr_min_page_colors(
+                mr=Memory_region(name=mr_name),
+                minimum=min_page_colors_of_mr
+            )
+
+            mr_min_page_colors.append(mr_min_page_colors_pred)
+
+        print(str(mr_min_page_colors))
+
+        # TODO: Hardcoded
+        cache_is_cpu_bound_properties = [
+            Cache_is_cpu_bound(cache_level=Level(level_id=1), yes_no="yes"),
+            Cache_is_cpu_bound(cache_level=Level(level_id=2), yes_no="yes"),
+            Cache_is_cpu_bound(cache_level=Level(level_id=3), yes_no="no")
+        ]
 
         ##
 
@@ -298,24 +362,27 @@ class ASPColorAssigner(PageColoringModel.ColorAssigner):
             unifier=[
                 Memory_region, Executor,
                 Kernel, Subject, Channel, Cpu, Ex_cpu,
-                L1_color, L2_color, L3_color, Page_color,
+                Cache_color, Page_color, System_page_color,
                 Cache_isolation_domain,
                 Mr_cache_isolation,
-                Map_pc,
+                Mr_pc,
                 L3_count, L2_count, L1_count,
-                Mr_cpu, Mapped  # , C
+                Mr_cpu, Mapped, Mr_min_page_colors, Mr_spc,
+                Cache_is_cpu_bound, Level,
+                Reads_from, Writes_to
             ])
         ctrl.load(ASP_PROGRAM_PATH)
 
         fact_base = kernels + subjects + channels + cpus + ex_cpus + \
                     l1_colors + l2_colors + l3_colors + page_colors + \
                     clingo_cache_isolations_domains + \
-                    mr_cache_isolations
+                    mr_cache_isolations + mr_min_page_colors + cache_is_cpu_bound_properties + \
+                    reads_from + writes_to
 
         instance = FactBase(fact_base)
 
         # Show fact base.
-        # print(instance.asp_str())
+        print(instance.asp_str())
 
         ctrl.add_facts(instance)
         ctrl.ground([("base", [])])
@@ -331,37 +398,29 @@ class ASPColorAssigner(PageColoringModel.ColorAssigner):
                 "No ASP solution found. Error can be anything. ASP unsatisfiability is hard to debug."
             )
 
+        logging.debug("hallo"+solution.asp_str())
+
         query1 = solution.select(L1_count)
         query2 = solution.select(L2_count)
         query3 = solution.select(L3_count)
-        query4 = solution.select(Map_pc).order_by(Map_pc.memory_region)
+        #query4 = solution.select(Map_pc).order_by(Map_pc.memory_region)
+        query4 = solution.select(Mr_spc).order_by(Mr_spc.mr)
 
         l1_counts = query1.get()
         l2_counts = query2.get()
         l3_counts = query3.get()
-        mapped_page_colors = query4.get()
+        mapped_system_page_colors = query4.get()
 
         logging.info("Mapped L1 colors: " + str(l1_counts[0].num))
         logging.info("Mapped L2 colors: " + str(l2_counts[0].num))
         logging.info("Mapped L3 colors: " + str(l3_counts[0].num))
 
-        for mapping in mapped_page_colors:
-            if isinstance(mapping.memory_region, Symbol):
-                if mapping.memory_region.name == "c":  # Channel
-                    assert len(mapping.memory_region.arguments) == 2
-                    src = str(mapping.memory_region.arguments[0])
-                    trgt = str(mapping.memory_region.arguments[1])
-                    memory_region =\
-                        predicate_to_memory_region[Channel(source=src, target=trgt)]
-                elif len(mapping.memory_region.arguments) == 0:
-                    memory_region = \
-                        predicate_to_memory_region[Memory_region(name=mapping.memory_region.name)]
-                else:
-                    assert False, "Unexpected."
-            else:
-                assert False, "Unexpected."
+        for mapping in mapped_system_page_colors:
+            memory_region = predicate_to_memory_region[
+                Memory_region(name=mapping.mr.name)
+            ]
 
-            system_page_color = predicate_to_system_page_color[mapping.page_color]
+            system_page_color = predicate_to_system_page_color[mapping.spc]
             assignment[system_page_color].add(memory_region)
 
         return assignment
